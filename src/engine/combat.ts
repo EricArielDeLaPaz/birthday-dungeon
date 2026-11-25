@@ -7,6 +7,7 @@ export type Skill = {
   cost: number
   power: number
   attribute: Attribute
+  additionalAttributes?: Attribute[]
   type: 'physical' | 'magic' | 'heal'
   target: 'enemy' | 'all-enemies' | 'ally' | 'all-allies'
   effect?: StatusKind | StatusKind[]
@@ -52,15 +53,20 @@ export function calculateDamage(attacker: Unit, defender: Unit, skill: Skill, at
   const weakened = skill.type === 'physical' && attacker.statuses.some((status) => status.kind === 'Burn')
   const boosted = attacker.statuses.some((status) => status.kind === 'ATK Up')
   const defenseDown = defender.statuses.some((status) => status.kind === 'DEF Down')
-  const dualCancel = defender.attributes.includes(skill.attribute) &&
-    defender.attributes.includes(opposingAttribute[skill.attribute])
-  const advantage = dualCancel ? 1 : defender.attributes.includes(opposingAttribute[skill.attribute]) ? 2 : 1
+  const attackAttributes = [skill.attribute, ...(skill.additionalAttributes ?? [])]
+  const advantage = attackAttributes.reduce((total, attribute) => {
+    const dualCancel = defender.attributes.includes(attribute) &&
+      defender.attributes.includes(opposingAttribute[attribute])
+    return total + (dualCancel ? 1 : defender.attributes.includes(opposingAttribute[attribute]) ? 2 : 1)
+  }, 0) / attackAttributes.length
   const defense = defender.def * (1 + formationBonus(defender).def) * (defenseDown ? 0.7 : 1) *
     (defender.statuses.some((status) => status.kind === 'DEF Up') ? 1.25 : 1)
-  const passiveMitigation = defender.ability.startsWith('Stoneheart') ? 0.85 : 1
-  return Math.max(1, Math.round(((attack * (1 + attackBonus) * (weakened ? 0.5 : 1) *
-    (boosted ? 1.25 : 1) * skill.power / 100 * advantage) - defense * 0.35))
-    * passiveMitigation)
+  const stoneheartMitigation = defender.ability.startsWith('Stoneheart')
+  const resonantMitigation = defender.ability.startsWith('Resonant Stone') && defender.hp / defender.maxHp > 0.5
+  const passiveMitigation = stoneheartMitigation || resonantMitigation ? 0.85 : 1
+  const damage = attack * (1 + attackBonus) * (weakened ? 0.5 : 1) *
+    (boosted ? 1.25 : 1) * skill.power / 100 * advantage - defense * 0.35
+  return Math.max(1, Math.round(damage * passiveMitigation))
 }
 
 export function chargeGauge(unit: Unit, skillIndex: number): Unit {

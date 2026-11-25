@@ -4,18 +4,19 @@ import {
   Shield, ShoppingBag, Sparkles, Swords, UsersRound, X,
 } from 'lucide-react'
 import './App.css'
-import { assetMap } from './data/assetMap'
+import { assetMap, DUNGEON_BACKGROUNDS } from './data/assetMap'
 import { BIRTHDAY_CONFIG } from './data/birthdayConfig'
 import { createEnemy } from './data/enemies'
 import { heroes, recruits } from './data/heroes'
 import { shopItems, applyItem, type ItemId } from './data/items'
-import { actNames, stages, type Stage } from './data/stages'
+import { stages, type Stage } from './data/stages'
 import {
   addStatus, calculateDamage, chargeGauge, expireStageBuffs, formationBonus,
   getTargetId, sortBySpeed, tickStatuses, type FloatingText, type Skill, type Unit,
 } from './engine/combat'
 
 type Modal = 'shop' | 'team' | 'items' | 'details' | 'hostage' | 'camp' | null
+type TeamTab = 'squad' | 'enemies'
 type SavedRun = {
   stageNumber: number
   gold: number
@@ -54,31 +55,87 @@ function firstLivingHero(roster: Unit[], teamIds: string[]) {
     .filter((unit): unit is Unit => unit !== undefined && unit.hp > 0))[0]
 }
 
-function Avatar({ unit, compact = false, combat = false }: { unit: Unit; compact?: boolean; combat?: boolean }) {
-  const art = assetMap[unit.id.replace(/-\d+$/, '')] ?? { accent: '#d8b86e', glyph: '✦' }
+function UnitSprite({ unit, compact = false, combat = false }: { unit: Unit; compact?: boolean; combat?: boolean }) {
+  const assetId = unit.id.replace(/-\d+$/, '')
+  const art = assetMap[assetId] ?? { accent: '#C9A45C', glyph: '✦', scale: 1, footOffsetPx: 4 }
   const sprite = combat ? art.combatIllustrationUrl : art.pixelSpriteUrl
+  const [failedSprite, setFailedSprite] = useState<string | null>(null)
+  const failed = failedSprite === sprite
+  const boss = assetId.startsWith('boss-')
+  const dragon = assetId.startsWith('minidragon-')
+  const accent = art.accent
+  const ink = '#171a20'
   return (
-    <span className={`avatar ${compact ? 'avatar-small' : ''} ${combat ? 'combat-avatar' : ''}`} style={{ '--avatar-accent': art.accent } as React.CSSProperties} aria-hidden="true">
-      {sprite ? <img src={sprite} alt="" /> : combat ? <svg className="pixel-sprite" viewBox="0 0 64 64" shapeRendering="crispEdges">
-        <path d="M7 57h18V45h8V36h8l10 8 7 11H43l-9-5H22v7H7z" fill="#171619" />
-        <path d="M17 49h13v6H17zM36 44l9 5-4 5-9-5z" fill={art.accent} />
-        <path d="M22 30h16v16H22z" fill={art.accent} />
-        <path d="M25 18h15v14H25z" fill="#d3a887" />
-        <path d="M23 15h19v8h-4v4h-5v-4h-7v4h-4z" fill={art.accent} />
-        <path d="M35 26h3v2h-3zM27 27h4v2h-4z" fill="#171619" />
-        <path d="M11 59h44v3H11z" fill={art.accent} opacity=".7" />
-      </svg> : <svg className="pixel-sprite" viewBox="0 0 64 64" shapeRendering="crispEdges">
-        <path d="M12 58h40v-7h-5V40h-4V29H21v11h-4v11h-5z" fill="#171619" />
-        <path d="M18 53h7V42h4V30h-8v10h-3zM39 30h8v10h3v13h-7V42h-4z" fill={art.accent} />
-        <path d="M25 42h14v11H25z" fill={art.accent} />
-        <path d="M25 19h14v15H25z" fill="#d3a887" />
-        <path d="M21 15h22v8h-4v4h-4v-4h-8v4h-4v-4h-2z" fill={art.accent} />
-        <path d="M27 27h3v2h-3zM35 27h3v2h-3z" fill="#171619" />
-        <path d="M20 39h5v5h-5zM39 39h5v5h-5zM29 36h6v2h-6z" fill="#eee1c8" />
-        <path d="M28 46h3v7h-3zM35 46h3v7h-3z" fill="#211e20" />
-        <path d="M10 58h44v3H10z" fill={art.accent} opacity=".7" />
+    <span className={`avatar ${compact ? 'avatar-small' : ''} ${combat ? 'combat-avatar' : ''} ${boss ? 'sprite-boss' : ''} ${dragon ? 'sprite-dragon' : ''}`} style={{ '--avatar-accent': accent, '--sprite-scale': art.scale } as React.CSSProperties} aria-hidden="true">
+      {sprite && !failed && <img src={sprite} alt="" onError={(event) => setFailedSprite(event.currentTarget.getAttribute('src') ?? '')} />}
+      {(!sprite || failed) && <svg className="pixel-sprite procedural-sprite" viewBox="0 0 120 150" shapeRendering="crispEdges" aria-hidden="true">
+        <ellipse cx="60" cy="142" rx="34" ry="5" fill="#090b0f" opacity=".7" />
+        {assetId === 'boss-bone-dragon' ? <>
+          <path d="M56 59 11 15 19 50 5 39 22 75 44 87M64 59l45-44-8 35 14-11-17 36-22 8" fill="#d4c9ac" stroke={ink} strokeWidth="4" />
+          <path d="M46 81q-11 13-6 34l11 14 8-7 8 7 15-17-7-28-12-9z" fill="#b5aa91" stroke={ink} strokeWidth="4" />
+          <path d="M45 87q15 9 32 0m-30 9q16 10 30 1m-28 9q14 10 27 1m-24 9q12 7 22-1" fill="none" stroke="#484b4c" strokeWidth="4" />
+          <path d="m43 74-15-13 7 21-10 15 20-5m35-18 17-13-8 21 11 15-21-5" fill="#dad0b6" stroke={ink} strokeWidth="4" />
+          <path d="m76 50 18-11-9 19 14 4-24 5-15-9z" fill="#ddd3bb" stroke={ink} strokeWidth="4" />
+          <path d="m89 42 13-15-3 19m-23 10 13-2" fill="none" stroke={ink} strokeWidth="4" />
+          <path d="M91 59h5v4h-5z" fill="#b76258" />
+        </> : assetId === 'boss-choir-monolith' ? <>
+          <path d="M31 134V37l11-12v-9h36v9l11 12v97z" fill="#626b70" stroke={ink} strokeWidth="5" />
+          <path d="M24 49h72v9H24zm4 28h64v5H28zm0 28h64v5H28z" fill="#98a09c" />
+          <path d="M51 31h18v18H51zm-2 33 11-8 11 8v22L60 94 49 86zm-7 47h36v8H42z" fill="#292e34" stroke="#c9a45c" strokeWidth="3" />
+          <path d="M8 135h104v8H8zM15 122h90v8H15z" fill="#3c444b" stroke={ink} strokeWidth="4" />
+          <path d="M58 67h4v14h-4zm-2 38h8v5h-8z" fill="#ddd2b5" />
+        </> : assetId === 'boss-eclipse-seraph' ? <>
+          <circle cx="60" cy="35" r="22" fill="none" stroke="#c9a45c" strokeWidth="5" />
+          <path d="M47 58 13 22l13 42L7 54l30 40m36-36 34-36-13 42 19-12-30 40" fill="#7a7778" stroke={ink} strokeWidth="4" />
+          <path d="m43 70-35-2 28 17-22 12 37-3m31-24 35-2-28 17 22 12-37-3" fill="#908b88" stroke={ink} strokeWidth="4" />
+          <path d="m50 57-10 16 12 9-8 44 16 10 17-10-10-44 13-9-11-16z" fill="#b7ad9c" stroke={ink} strokeWidth="4" />
+          <path d="M49 29h22l8 13-7 17H48l-8-17z" fill="#d4c9ac" stroke={ink} strokeWidth="4" />
+          <path d="M47 42h8v4h-8zm18 0h8v4h-8zm-6 14h6" fill="none" stroke="#8c4a48" strokeWidth="4" />
+          <path d="M42 77 19 60l16 30-7 25 21 10m28-48 24-17-17 30 8 24-23 11" fill="#d4c9ac" stroke={ink} strokeWidth="4" />
+        </> : dragon ? <>
+          <path d="m49 71-32-37 7 38-15-9 23 37 22 1m17-30 28-37-4 40 14-10-22 38-23 2" fill={accent} stroke={ink} strokeWidth="5" />
+          <path d="m34 99 10-25 24-9 20 13 5 29-19 20-29-5z" fill="#625b52" stroke={ink} strokeWidth="5" />
+          <path d="m76 78 22-15 13 7-5 14-21 7-14-5z" fill={accent} stroke={ink} strokeWidth="4" />
+          <path d="m96 67 5-14 6 13m-19 8 8-14" fill="none" stroke={ink} strokeWidth="4" />
+          <path d="M102 78h5v4h-5zM44 98l-8 27 14 8 9-24m15-4 13 28 11-8-8-28" fill="#8b806d" stroke={ink} strokeWidth="4" />
+          <path d="m44 113 20 6 20-9m-29-21 15 3" fill="none" stroke="#d4c9ac" strokeWidth="3" />
+        </> : <>
+          <path d="M40 43 29 24l17 9 14-9 14 10 16-8-8 20 9 20-12 17 5 31-18 14-6-5-7 5-18-14 5-31-13-17z" fill={accent} stroke={ink} strokeWidth="5" />
+          <path d="M43 40h34l8 17-9 15H43l-9-15z" fill="#c6b8a2" stroke={ink} strokeWidth="4" />
+          <path d="M44 55h8v5h-8zm24 0h8v5h-8zm-12 13h9" fill="none" stroke="#282b31" strokeWidth="4" />
+          <path d="M40 83 21 108l6 8 23-19m28-14 21 22-7 8-24-17" fill="none" stroke={ink} strokeWidth="7" />
+          {unit.role === 'Tank' && <path d="m91 74 20 8v34l-20 8z" fill="#7b827f" stroke={ink} strokeWidth="4" />}
+          {unit.role === 'Assassin' && <path d="m27 96-15 26 6 3 19-22m58-10 16 26-6 4-22-20" fill="none" stroke="#c9c1ae" strokeWidth="4" />}
+          {unit.role === 'Mage' && <path d="M101 41v72m-9-62h18m-15-7 6-10 6 10" fill="none" stroke="#d2c8b1" strokeWidth="4" />}
+          {unit.role === 'Healer' && <path d="M56 88h8v23h-8zm-8 7h24v8H48z" fill="#ece3ce" stroke={ink} strokeWidth="2" />}
+          {unit.role === 'Attacker' && <path d="M94 41q24 25 0 50m0-25 16-14m-16 14 16 14M91 43l18 47" fill="none" stroke="#d2c8b1" strokeWidth="4" />}
+        </>}
       </svg>}
     </span>
+  )
+}
+
+const Avatar = UnitSprite
+
+function DungeonBackdrop({ areaId }: { areaId: string }) {
+  const [imageFailed, setImageFailed] = useState(false)
+  const background = DUNGEON_BACKGROUNDS[areaId]
+  return (
+    <div className={`dungeon-backdrop backdrop-${areaId}`} aria-hidden="true">
+      {background && !imageFailed && <img src={background} alt="" onError={() => setImageFailed(true)} />}
+      <svg viewBox="0 0 1200 700" preserveAspectRatio="xMidYMid slice">
+        <path d="M0 700V420Q80 390 120 320L150 160Q225 80 300 160L330 420M0 700h1200V410q-100-40-130-120l-20-140q-75-75-150 0l-30 260M390 700V300q210-290 420 0v400" fill="none" stroke="currentColor" strokeWidth="22" opacity=".35" />
+        <path d="M410 700V310q190-230 380 0v390M465 700V340q135-160 270 0v360" fill="none" stroke="currentColor" strokeWidth="8" opacity=".25" />
+        <path d="M0 575Q220 535 410 585T800 575t400 0v125H0z" fill="currentColor" opacity=".1" />
+        <path d="M0 610h1200M160 570l28-90 28 90m710 0 30-100 30 100" fill="none" stroke="currentColor" strokeWidth="5" opacity=".2" />
+        {areaId === 'ashen-ossuary' && <g fill="currentColor" opacity=".25"><path d="m155 440 35-130 35 130zm835 0 35-130 35 130z" /><circle cx="190" cy="360" r="12" /><circle cx="1025" cy="360" r="12" /></g>}
+        {areaId === 'sunken-catacombs' && <g fill="none" stroke="currentColor" strokeWidth="5" opacity=".28"><path d="M0 540q150-40 300 0t300 0 300 0 300 0m-900 45q150-35 300 0t300 0 300 0" /><path d="M310 580v-75q40-50 80 0v75m420 0v-75q40-50 80 0v75" /></g>}
+        {areaId === 'echoing-vault' && <g fill="currentColor" opacity=".28"><path d="M410 570V260h54v310zm130 0V200h54v370zm130 0V200h54v370zm130 0V260h54v310z" /><path d="m450 185 40-40 40 40m80-20 40-40 40 40m80 20 40-40 40 40" fill="none" stroke="currentColor" strokeWidth="8" /></g>}
+        {areaId === 'starless-nave' && <g fill="none" stroke="currentColor" strokeWidth="8" opacity=".23"><path d="M410 600V220l40-120 40 120v380m260 0V220l40-120 40 120v380M500 300h200M520 360h160" /><path d="m600 155 14 30 33 5-24 23 6 34-29-16-29 16 6-34-24-23 33-5z" fill="currentColor" /></g>}
+        {areaId === 'eclipse-throne' && <g fill="none" stroke="currentColor" strokeWidth="8" opacity=".3"><circle cx="600" cy="330" r="175" /><circle cx="600" cy="330" r="128" /><path d="M440 575h320l-40-90H480zm55-110h210l-30-55H525zm55-75h100v-80H550z" fill="currentColor" /></g>}
+      </svg>
+      <span className="backdrop-vignette" />
+    </div>
   )
 }
 
@@ -88,13 +145,91 @@ function AttributeBadge({ attributes }: { attributes: Unit['attributes'] }) {
 
 function HealthBar({ unit }: { unit: Unit }) {
   const percent = Math.max(0, Math.min(100, unit.hp / unit.maxHp * 100))
-  return <div className="health-track" aria-label={`${unit.hp} of ${unit.maxHp} health`}><span style={{ width: `${percent}%` }} /></div>
+  const tone = percent > 55 ? 'healthy' : percent > 25 ? 'wounded' : 'critical'
+  return <div className="health-track" aria-label={`${unit.hp} of ${unit.maxHp} health`}><span className={tone} style={{ width: `${percent}%` }} /></div>
 }
 
 function StatusMarks({ unit }: { unit: Unit }) {
   if (!unit.statuses.length) return null
-  const marks: Record<string, string> = { Burn: '🔥', Curse: '☠', Taunt: '⚑', Stealth: '◌', 'ATK Up': '↑', 'DEF Up': '⬟', 'DEF Down': '↓' }
+  const marks: Record<string, string> = { Burn: 'BRN', Curse: 'CUR', Taunt: 'TAU', Stealth: 'STL', 'ATK Up': 'ATK+', 'DEF Up': 'DEF+', 'DEF Down': 'DEF−' }
   return <div className="status-marks">{unit.statuses.map((status) => <span key={status.kind} title={`${status.kind}, ${status.turns} turns`}>{marks[status.kind]}</span>)}</div>
+}
+
+function FormationPad({
+  side,
+  units,
+  activeHeroId,
+  selectedEnemyId,
+  targetType,
+  floating,
+  animatingUnitId,
+  onSelect,
+}: {
+  side: 'heroes' | 'enemies'
+  units: Unit[]
+  activeHeroId: string | null
+  selectedEnemyId: string | null
+  targetType: Skill['target'] | null
+  floating: FloatingText[]
+  animatingUnitId: string | null
+  onSelect: (unit: Unit) => void
+}) {
+  const isEnemyPad = side === 'enemies'
+  const livingUnits = units.filter((unit) => unit.hp > 0)
+  const placed = livingUnits.map((unit, index) => {
+    const row = isEnemyPad ? (index < 2 ? 'Front' : 'Back') : unit.row ?? 'Back'
+    const rowIndex = livingUnits.filter((candidate, candidateIndex) => {
+      const candidateRow = isEnemyPad ? (candidateIndex < 2 ? 'Front' : 'Back') : candidate.row ?? 'Back'
+      return candidateRow === row
+    }).findIndex((candidate) => candidate.id === unit.id)
+    const coordinates = row === 'Front'
+      ? [{ x: 27, y: 76 }, { x: 72, y: 78 }]
+      : [{ x: 12, y: 43 }, { x: 50, y: 40 }, { x: 88, y: 43 }]
+    const position = coordinates[rowIndex % coordinates.length]
+    return { unit, row, position }
+  })
+
+  return (
+    <div className={`formation-pad ${isEnemyPad ? 'enemy-formation' : 'player-formation'}`}>
+      <div className="pad-heading">{isEnemyPad ? 'HOSTILE FORMATION' : 'YOUR FORMATION'}</div>
+      <div className="pad-row-label front-row-label"><Shield size={12} /> FRONT ROW</div>
+      <div className="pad-row-label back-row-label"><Sparkles size={12} /> BACK ROW</div>
+      <div className="formation-lane-divider" />
+      {[
+        { row: 'Front', positions: [{ x: 27, y: 76 }, { x: 72, y: 78 }] },
+        { row: 'Back', positions: [{ x: 12, y: 43 }, { x: 50, y: 40 }, { x: 88, y: 43 }] },
+      ].flatMap(({ row, positions }) => positions.map((position, index) => (
+        <span key={`${row}-${index}`} className={`pad-circle circle-${row.toLowerCase()}`} style={{ left: `${position.x}%`, top: `${position.y}%` }} />
+      )))}
+      {placed.map(({ unit, row, position }) => {
+        const isHero = !isEnemyPad
+        const isValidTarget = targetType && (
+          (isHero && (targetType === 'ally' || targetType === 'all-allies')) ||
+          (isEnemyPad && (targetType === 'enemy' || targetType === 'all-enemies'))
+        )
+        const asset = assetMap[unit.id.replace(/-\d+$/, '')]
+        const bonus = formationBonus({ ...unit, row })
+        const roleMatch = isHero && (bonus.phys > 0 || bonus.mag > 0 || bonus.def > 0 || bonus.heal > 0)
+        return (
+          <button
+            type="button"
+            key={unit.id}
+            className={`pad-unit ${isEnemyPad ? 'foe-unit' : 'ally-unit'} ${unit.isBoss ? 'boss-unit' : ''} ${roleMatch ? 'row-bonus' : ''} ${activeHeroId === unit.id || selectedEnemyId === unit.id ? 'selected' : ''} ${isValidTarget ? 'target-valid' : ''} ${animatingUnitId === unit.id ? 'animating' : ''}`}
+            style={{ left: `${position.x}%`, top: `${position.y}%`, '--unit-accent': asset?.accent ?? '#C9A45C', '--foot-offset': `${asset?.footOffsetPx ?? 4}px`, '--sprite-scale': asset?.scale ?? 1 } as React.CSSProperties}
+            onClick={() => onSelect(unit)}
+            title={`${unit.name} · ${unit.role} · ${unit.hp}/${unit.maxHp} HP`}
+            aria-label={`Inspect ${unit.name}, ${unit.hp} of ${unit.maxHp} health`}
+          >
+            <span className={`pad-circle-marker circle-${row.toLowerCase()} ${roleMatch ? 'buffed' : ''}`} />
+            <span className="sprite-anchor"><UnitSprite unit={unit} compact /></span>
+            <span className="pad-unit-name">{unit.name}</span>
+            <span className="pad-unit-health">{unit.hp}</span>
+            {floating.filter((text) => text.targetId === unit.id).map((text) => <span key={text.id} className={`float-number ${text.kind}`}>{text.text}</span>)}
+          </button>
+        )
+      })}
+    </div>
+  )
 }
 
 function App() {
@@ -126,10 +261,12 @@ function App() {
   const [selectedUnitForItem, setSelectedUnitForItem] = useState<string | null>(null)
   const [pendingItem, setPendingItem] = useState<ItemId | null>(null)
   const [selectedTeamSwapId, setSelectedTeamSwapId] = useState<string | null>(null)
+  const [teamTab, setTeamTab] = useState<TeamTab>('squad')
   const [sold, setSold] = useState<ItemId[]>(saved?.sold ?? [])
   const [floating, setFloating] = useState<FloatingText[]>([])
   const [cutIn, setCutIn] = useState<Unit | null>(null)
   const [impact, setImpact] = useState<string | null>(null)
+  const [animatingUnitId, setAnimatingUnitId] = useState<string | null>(null)
   const [isResolving, setIsResolving] = useState(false)
   const [log, setLog] = useState('Choose Attack to take your turn.')
 
@@ -179,7 +316,7 @@ function App() {
     setStarted(true)
     setVictory(false)
     setActiveHeroId(starterId)
-    setLog('Your party enters the Whispering Wilds.')
+    setLog(`Your party enters the ${stages[0].areaName}.`)
   }
 
   const applyStatus = (target: Unit, effect?: Skill['effect'], duration = 2) =>
@@ -235,6 +372,8 @@ function App() {
     setTurns((value) => value + 1)
     setImpact(skill.attribute.toLowerCase())
     window.setTimeout(() => setImpact(null), 520)
+    setAnimatingUnitId(actor.id)
+    window.setTimeout(() => setAnimatingUnitId(null), 450)
     setIsResolving(true)
     const dramatic = skillIndex === 3 && !actor.isMinion
     if (dramatic) setCutIn(actor)
@@ -268,7 +407,10 @@ function App() {
       if (!targets.length) return
       const gauge = [enemy.gauge[0] + 1, enemy.gauge[1], enemy.gauge[2]] as Unit['gauge']
       const useUltimate = gauge[0] >= 4
-      const enemySkill = useUltimate ? enemy.skills[3] : enemy.skills[0]
+      const isUmbral = enemy.id.startsWith('boss-eclipse-seraph') && Boolean(enemy.passiveUsed)
+      const enemySkill = useUltimate ? enemy.skills[3] : isUmbral
+        ? { ...enemy.skills[0], name: 'Eclipse Brand · Umbral', power: 205, attribute: 'Shadow' as const, type: 'physical' as const, target: 'enemy' as const, description: 'Umbral stance: a Shadow strike burns a single target.', effect: 'Burn' as const }
+        : enemy.skills[0]
       const targetId = enemySkill.target === 'enemy' ? getTargetId(targets) : undefined
       const enemyTeamHeal = enemySkill.type === 'heal' && enemySkill.target === 'all-allies'
       const targetsForAction = enemyTeamHeal
@@ -282,7 +424,13 @@ function App() {
           else partyAfter = partyAfter.map((unit) => unit.id === target.id ? { ...unit, hp: Math.min(unit.maxHp, unit.hp + heal) } : unit)
           texts.push({ id: Date.now() + Math.random(), targetId: target.id, text: `+${heal}`, kind: 'heal' })
         } else {
-          const damage = calculateDamage(enemy, target, enemySkill)
+          const broodCount = enemy.id.startsWith('boss-bone-dragon')
+            ? enemyAfter.filter((unit) => unit.hp > 0 && unit.id.startsWith('minidragon-')).length
+            : 0
+          const attacker = broodCount
+            ? { ...enemy, physAtk: Math.round(enemy.physAtk * (1 + broodCount * 0.12)), magAtk: Math.round(enemy.magAtk * (1 + broodCount * 0.12)) }
+            : enemy
+          const damage = calculateDamage(attacker, target, enemySkill)
           const wounded = damage === 0 ? target : applyStatus({ ...target, hp: Math.max(0, target.hp - damage) }, enemySkill.effect)
           partyAfter = partyAfter.map((unit) => unit.id === target.id ? wounded : unit)
           texts.push({ id: Date.now() + Math.random(), targetId: target.id, text: damage ? `-${damage}` : 'DODGE', kind: damage ? 'damage' : 'status' })
@@ -290,10 +438,18 @@ function App() {
       })
       enemyAfter = enemyAfter.map((unit) => {
         if (unit.id !== enemy.id) return unit
-        const acted = { ...unit, gauge: useUltimate ? [0, gauge[1], gauge[2]] as Unit['gauge'] : gauge }
+        const acted = {
+          ...unit,
+          gauge: useUltimate ? [0, gauge[1], gauge[2]] as Unit['gauge'] : gauge,
+          passiveUsed: unit.id.startsWith('boss-eclipse-seraph') ? !unit.passiveUsed : unit.passiveUsed,
+        }
         return enemySkill.selfEffect ? addStatus(acted, enemySkill.selfEffect) : acted
       })
       if (useUltimate && enemy.isBoss) setCutIn(enemy)
+      setImpact(enemySkill.attribute.toLowerCase())
+      window.setTimeout(() => setImpact(null), 520)
+      setAnimatingUnitId(enemy.id)
+      window.setTimeout(() => setAnimatingUnitId(null), 450)
       setLog(`${enemy.name} used ${enemySkill.name}.`)
     })
     partyAfter = partyAfter.map((unit) => {
@@ -457,6 +613,21 @@ function App() {
     setSelectedTeamSwapId(unit.id)
   }
 
+  const dropTeamMember = (target: Unit, sourceId: string) => {
+    if (!teamIds.includes(target.id) || teamIds.includes(sourceId)) return
+    const source = roster.find((unit) => unit.id === sourceId)
+    if (!source) return
+    if (teamIds.length < 5) {
+      const frontCount = teamIds.filter((id) => roster.find((unit) => unit.id === id)?.row === 'Front').length
+      setTeamIds((current) => [...current, source.id])
+      updateRoster(source.id, (unit) => ({ ...unit, row: frontCount < 2 ? 'Front' : 'Back' }))
+    } else {
+      setTeamIds((current) => current.map((id) => id === target.id ? source.id : id))
+      updateRoster(source.id, (unit) => ({ ...unit, row: target.row ?? 'Back' }))
+    }
+    setSelectedTeamSwapId(null)
+  }
+
   const selectSkill = (index: number) => {
     if (!activeHero) return
     const skill = activeHero.skills[index]
@@ -525,21 +696,37 @@ function App() {
         <header className="title-brand"><span className="brand-mark"><Sparkles size={18} /></span> MYTHIC DUNGEON <i>✦</i></header>
         <section className="title-content">
           <div className="eyebrow"><span /> A BIRTHDAY ADVENTURE <span /></div>
-          <h1>THE ECLIPSE<br /><em>AWAKENS</em></h1>
-          <p className="title-copy">Gather your companions. Break the ancient curse.<br />Write a legend worth celebrating.</p>
+          <h1>DESCEND INTO<br /><em>LEGEND</em></h1>
+          <p className="title-copy">Choose your first champion. Gather companions.<br />Break the eclipse and claim a birthday legend.</p>
           <div className="starter-label"><span>01</span> CHOOSE YOUR FIRST COMPANION</div>
           <div className="starter-grid">
-            {heroes.map((hero) => (
+            {heroes.map((hero) => {
+              const rowBonus = {
+                Tank: 'FRONT · +25% DEF',
+                Assassin: 'FRONT · +20% PHY ATK',
+                Attacker: 'BACK · +20% PHY ATK',
+                Mage: 'BACK · +20% MAG ATK',
+                Healer: 'BACK · +25% HEAL',
+              }[hero.role]
+              return (
               <button className="starter-card" key={hero.id} onClick={() => beginRun(hero.id)}>
-                <Avatar unit={hero} />
-                <div className="starter-meta"><span className="starter-role">{hero.role} <b>·</b> {hero.attributes[0]}</span><strong>{hero.name}</strong><small>{hero.ability}</small><small className="starter-skill-names">{hero.skills.map((skill) => skill.name).join(' · ')}</small></div>
-                <ChevronRight className="starter-arrow" size={16} />
+                <span className="starter-portrait"><Avatar unit={hero} /><span>{hero.attributes[0]}</span></span>
+                <span className="starter-meta">
+                  <span className="starter-role">{hero.role} <b>·</b> {hero.attributes[0]}</span>
+                  <strong>{hero.name}</strong>
+                  <small className="starter-passive"><b>PASSIVE</b> {hero.ability}</small>
+                  <span className="starter-skill-list">{hero.skills.map((skill, index) => (
+                    <small key={skill.name}><i>{index === 0 ? 'BASIC' : index === 3 ? 'ULT' : `S${index}`}</i>{skill.name}<b>{skill.power}%</b></small>
+                  ))}</span>
+                </span>
+                <span className="starter-bonus">{rowBonus}<ChevronRight className="starter-arrow" size={16} /></span>
               </button>
-            ))}
+              )
+            })}
           </div>
           {saved && <button className="resume-button" onClick={resumeSavedRun}>Continue your journey <ChevronRight size={15} /></button>}
         </section>
-        <footer className="title-footer"><span>THREE ACTS · FIFTEEN STAGES · ONE UNFORGETTABLE DAY</span><span>✦ A tale made just for you ✦</span></footer>
+        <footer className="title-footer"><span>SIX DUNGEON AREAS · FIFTEEN STAGES · ONE UNFORGETTABLE DAY</span><span>✦ A tale made just for you ✦</span></footer>
       </main>
     )
   }
@@ -549,42 +736,42 @@ function App() {
       <main className="victory-screen">
         <div className="confetti-field" aria-hidden="true">{Array.from({ length: 44 }, (_, i) => <i key={i} style={{ '--i': i } as React.CSSProperties} />)}</div>
         <div className="victory-content"><div className="victory-seal"><Sparkles size={42} /></div><p className="eyebrow">THE FINAL ECLIPSE HAS FALLEN</p>
-          <h1>HAPPY BIRTHDAY,<br /><em>{BIRTHDAY_CONFIG.recipientName.toUpperCase()}!</em></h1>
-          <p className="victory-message">{BIRTHDAY_CONFIG.customMessage}</p>
+          <h1>{BIRTHDAY_CONFIG.headline.toUpperCase()}<br /><em>{BIRTHDAY_CONFIG.recipientName.toUpperCase()}!</em></h1>
+          <p className="victory-subheadline">{BIRTHDAY_CONFIG.subheadline}</p>
+          <p className="victory-message">{BIRTHDAY_CONFIG.personalMessage}</p>
           <div className="victory-summary"><span><Swords size={16} /> {turns} turns</span><span><UsersRound size={16} /> {party.length} companions</span><span><Coins size={16} /> {gold} gold earned</span></div>
           <div className="victory-party">{party.map((unit) => <div key={unit.id}><Avatar unit={unit} compact /><b>{unit.name}</b></div>)}</div>
+          <p className="victory-signature">{BIRTHDAY_CONFIG.fromSignature}</p>
           <button className="gold-button" onClick={() => { setStarted(false); setVictory(false); setStageNumber(1); setSaved(null); setRoster([]); setTeamIds([]); setLog('') }}>Begin another legend <ChevronRight size={16} /></button>
         </div>
       </main>
     )
   }
 
-  const actStageRange = (act: number) => stages.filter((entry) => entry.act === act)
   const skillCost = (unit: Unit, index: number) => index === 0 ? 0 : unit.gauge[index - 1]
+  const segmentStart = Math.floor((stage.number - 1) / 5) * 5 + 1
+  const segmentStages = stages.slice(segmentStart - 1, segmentStart + 4)
 
   return (
     <main className="game-shell">
+      <DungeonBackdrop key={stage.areaId} areaId={stage.areaId} />
       <header className="topbar">
         <div className="game-brand"><span className="brand-mark"><Sparkles size={15} /></span><span>MYTHIC <b>DUNGEON</b></span></div>
-        <section className="stage-progress" aria-label="Stage progress">
-          {[1, 2, 3].map((act) => <div className="act-track" key={act}>
-            <span className="act-title">ACT 0{act} <i>{actNames[act - 1]}</i></span>
-            <div className="stage-nodes">{actStageRange(act).map((entry) => (
-              <span key={entry.number} aria-label={`Stage ${entry.number}: ${entry.title}`} title={`${entry.number}. ${entry.title}`}
-                className={`stage-node ${entry.kind} ${entry.number === stageNumber ? 'current' : ''} ${entry.number < stageNumber || (!started && stageNumber === 15) ? 'complete' : ''}`}>
+        <section className="stage-progress" aria-label="Dungeon stage progress">
+          <div className="stage-segment-heading"><span>DESCENT TRACK</span><b>STAGE {stage.number} / 15</b><i>{stage.areaName}</i></div>
+          <div className="stage-nodes">{segmentStages.map((entry) => (
+              <span key={entry.number} aria-label={`Stage ${entry.number}: ${entry.title} · ${entry.kind}`} title={`${entry.number}. ${entry.title}`}
+                className={`stage-node ${entry.kind} ${entry.number === stageNumber ? 'current' : ''} ${entry.number < stageNumber ? 'complete' : ''}`}>
                 <span>{entry.kind === 'boss' ? '♛' : entry.kind === 'camp' ? '✦' : entry.number < stageNumber ? '✓' : entry.number}</span>
               </span>
-            ))}</div>
-          </div>)}
+          ))}</div>
         </section>
-        <div className="top-tools"><div className="gold-counter"><Coins size={16} /><b>{gold}</b><small>G</small></div>
-          <button className="wheel-button" title="Element wheel: opposing elements deal 2× damage. Dual opposing attributes cancel the weakness." onClick={() => setMessage('Opposing attributes deal 2× damage. Dual attributes cancel this weakness.')}>
-            <span className="wheel-icon">✦</span><span className="wheel-copy">ATTRIBUTE<br />WHEEL</span>
+        <div className="top-tools"><div className="gold-counter"><Coins size={16} /><b>{gold}</b><small>GOLD</small></div>
+          <button className="wheel-button" aria-label="Attribute wheel: Light and Shadow, Ice and Fire, Sound and Earth deal double damage when opposed; dual attributes cancel this weakness." title="Opposing attributes deal 2× damage. If a defender holds both attributes in a pair, the weakness cancels to 1×." onClick={() => setMessage('Light ↔ Shadow, Ice ↔ Fire, and Sound ↔ Earth deal 2× damage. Dual opposing attributes cancel to 1×.')}>
+            <span className="wheel-icon">✦</span><span className="wheel-copy">LIGHT ↔ SHADOW<br />ICE ↔ FIRE · SOUND ↔ EARTH</span>
           </button>
         </div>
       </header>
-
-      <div className="act-scenery" data-act={stage.act}><span className="scenery-orb" /><span className="scenery-line one" /><span className="scenery-line two" /></div>
 
       <div className="battle-layout">
         <aside className="unit-sidebar hero-sidebar">
@@ -594,8 +781,8 @@ function App() {
               const order = turnOrder.findIndex((candidate) => candidate.id === unit.id) + 1
               const bonus = formationBonus(unit)
               return <button key={unit.id} className={`unit-card hero-unit ${activeHero?.id === unit.id ? 'active' : ''} ${unit.hp <= 0 ? 'fallen' : ''}`} onClick={() => unit.hp > 0 && setActiveHeroId(unit.id)}>
-                <div className="unit-card-top"><span className="turn-badge">{order ? `${order}${order === 1 ? 'st' : order === 2 ? 'nd' : order === 3 ? 'rd' : 'th'}` : '—'}</span><Avatar unit={unit} compact /><div className="unit-name-wrap"><b>{unit.name}</b><span>{unit.role} · {unit.row ?? 'Back'}</span></div><span className="unit-hp-value">{unit.hp}</span></div>
-                <div className="unit-attributes"><AttributeBadge attributes={unit.attributes} /><span>ATK {unit.physAtk + unit.magAtk} · SPD {unit.spd}{bonus.phys || bonus.mag ? ' · +ATK' : bonus.def ? ' · +DEF' : bonus.heal ? ' · +HEAL' : ''}</span></div>
+                <div className="unit-card-top"><span className="turn-badge">{order ? `${order}${order === 1 ? 'st' : order === 2 ? 'nd' : order === 3 ? 'rd' : 'th'}` : '—'}</span><Avatar unit={unit} compact /><div className="unit-name-wrap"><b>{unit.name}</b><span>{unit.role} · {unit.row ?? 'Back'}</span></div><span className="unit-hp-value">{unit.hp}/{unit.maxHp}</span></div>
+                <div className="unit-attributes"><AttributeBadge attributes={unit.attributes} /><span>PHY {unit.physAtk} · MAG {unit.magAtk} · SPD {unit.spd}{bonus.phys || bonus.mag ? ' · ROW ATK' : bonus.def ? ' · ROW DEF' : bonus.heal ? ' · ROW HEAL' : ''}</span></div>
                 <HealthBar unit={unit} /><StatusMarks unit={unit} />
               </button>
             })}
@@ -603,36 +790,14 @@ function App() {
           <button className="sidebar-link" onClick={() => setModal('team')}><UsersRound size={14} /> Edit formation <ChevronRight size={13} /></button>
         </aside>
 
-        <section className={`arena ${attackMode ? 'attack-open' : ''} ${impact ? 'impact' : ''}`} data-impact={impact ?? undefined}>
-          <div className="arena-topline"><span><i /> {actNames[stage.act - 1]}</span><b>STAGE {String(stage.number).padStart(2, '0')} <small>/ 15</small></b></div>
+        <section className={`arena ${attackMode ? 'attack-open' : ''} ${impact ? 'impact' : ''}`} data-impact={impact ?? undefined} data-area={stage.areaId}>
+          <div className="arena-topline"><span><i /> {stage.areaName}</span><b>STAGE {String(stage.number).padStart(2, '0')} <small>/ 15</small></b></div>
           <div className="arena-location"><span>✦</span><h2>{stage.title}</h2><p>{stage.description}</p></div>
-          <div className="arena-ground"><span className="ground-ring ring-a" /><span className="ground-ring ring-b" /><span className="ground-horizon" /></div>
           <div className="battle-pads">
-            <div className="formation player-formation"><span className="formation-label">ALLIES</span>
-              {party.map((unit, index) => {
-                const row = unit.row ?? 'Back'
-                const targetType = selectedSkill === null ? null : activeHero?.skills[selectedSkill].target
-                const validTarget = targetType === 'ally' || targetType === 'all-allies'
-                const rowIndex = party.filter((member) => (member.row ?? 'Back') === row).findIndex((member) => member.id === unit.id)
-                const positions = row === 'Front'
-                  ? [{ left: '28%', top: '67%' }, { left: '62%', top: '79%' }]
-                  : [{ left: '13%', top: '37%' }, { left: '48%', top: '44%' }, { left: '27%', top: '18%' }]
-                return <button key={unit.id} className={`arena-unit ally-pixel row-${row.toLowerCase()} ${unit.hp <= 0 ? 'fallen' : ''} ${activeHero?.id === unit.id ? 'selected' : ''} ${selectedSkill !== null && validTarget && unit.hp > 0 ? 'target-valid' : ''}`} style={{ '--unit-index': index, '--unit-accent': assetMap[unit.id]?.accent ?? '#d8b86e', ...positions[rowIndex % positions.length] } as React.CSSProperties} onClick={() => selectedSkill !== null ? chooseTarget(unit) : unit.hp > 0 && setActiveHeroId(unit.id)} title={`${unit.name} · ${unit.role} · ${unit.hp}/${unit.maxHp} HP`}>
-                <Avatar unit={unit} compact /><span className="arena-unit-name">{unit.name}</span><span className="arena-unit-hp">{unit.hp}</span>
-                {floating.filter((text) => text.targetId === unit.id).map((text) => <span key={text.id} className={`float-number ${text.kind}`}>{text.text}</span>)}
-              </button>
-              })}
-              <span className="pad-dot dot-f1" /><span className="pad-dot dot-f2" /><span className="pad-dot dot-b1" /><span className="pad-dot dot-b2" /><span className="pad-dot dot-b3" />
-            </div>
+            <FormationPad side="heroes" units={party} activeHeroId={activeHero?.id ?? null} selectedEnemyId={selectedEnemyId} targetType={selectedSkill === null ? null : activeHero?.skills[selectedSkill].target ?? null} floating={floating} animatingUnitId={animatingUnitId} onSelect={chooseTarget} />
             <div className="battle-divider"><span>VS</span></div>
-            <div className="formation enemy-formation"><span className="formation-label">FOES</span>
-              {enemies.filter((unit) => unit.hp > 0).map((unit, index) => <button key={unit.id} className={`arena-unit enemy-pixel ${unit.isBoss ? 'boss-pixel' : ''} ${selectedEnemyId === unit.id ? 'selected' : ''} ${selectedSkill !== null && (activeHero?.skills[selectedSkill].target === 'enemy' || activeHero?.skills[selectedSkill].target === 'all-enemies') ? 'target-valid' : ''}`} style={{ '--unit-index': index, '--unit-accent': assetMap[unit.id.replace(/-\d+$/, '')]?.accent ?? '#e59a65' } as React.CSSProperties} onClick={() => chooseTarget(unit)} title={`${unit.name} · ${unit.hp}/${unit.maxHp} HP`}>
-                <Avatar unit={unit} compact /><span className="arena-unit-name">{unit.name}</span><span className="arena-unit-hp">{unit.hp}</span>
-                {floating.filter((text) => text.targetId === unit.id).map((text) => <span key={text.id} className={`float-number ${text.kind}`}>{text.text}</span>)}
-              </button>)}
-              <span className="pad-dot dot-f1" /><span className="pad-dot dot-f2" /><span className="pad-dot dot-b1" /><span className="pad-dot dot-b2" /><span className="pad-dot dot-b3" />
-            </div>
-            {stage.kind === 'fight' && <div className="hostage-cage" title={`${stage.hostages} hostages await rescue`}><span className="cage-glow">✦</span><span className="cage-bars">╫╫╫</span><span className="cage-captives">{recruits.filter((unit) => !roster.some((hero) => hero.id === unit.id)).slice(0, stage.hostages).map((unit) => <Avatar key={unit.id} unit={unit} compact />)}</span><b>{stage.hostages}</b><small>HOSTAGE<br />CAGE</small></div>}
+            <FormationPad side="enemies" units={enemies} activeHeroId={activeHero?.id ?? null} selectedEnemyId={selectedEnemyId} targetType={selectedSkill === null ? null : activeHero?.skills[selectedSkill].target ?? null} floating={floating} animatingUnitId={animatingUnitId} onSelect={chooseTarget} />
+            {stage.kind === 'fight' && <div className="hostage-cage" title={`${stage.hostages} hostages await rescue`}><span className="cage-mark">✦</span><span className="cage-bars">╫╫╫</span><span className="cage-captives">{recruits.filter((unit) => !roster.some((hero) => hero.id === unit.id)).slice(0, stage.hostages).map((unit) => <Avatar key={unit.id} unit={unit} compact />)}</span><b>{stage.hostages}</b><small>HOSTAGE CAGE</small></div>}
           </div>
           <div className="battle-log"><span>✦</span>{log}</div>
           {attackMode && <div className="combat-illustration"><Avatar unit={activeHero ?? heroes[0]} combat /><span>{activeHero?.name}</span></div>}
@@ -640,8 +805,16 @@ function App() {
             {activeHero?.skills.map((skill, index) => {
               const gauge = skillCost(activeHero, index)
               const ready = index === 0 || gauge >= skill.cost
+              const targetLabel = skill.target === 'all-enemies' || skill.target === 'all-allies' ? 'AOE' : 'SINGLE'
+              const skillAttributes = [skill.attribute, ...(skill.additionalAttributes ?? [])].join('/')
               return <button className={`skill-card ${ready ? 'ready' : 'charging'} ${selectedSkill === index ? 'chosen' : ''} ${index === 3 ? 'ultimate-card' : ''}`} key={skill.name} onClick={() => selectSkill(index)} title={skill.description}>
-                <span className="skill-level">{index === 0 ? 'BASIC' : index === 3 ? 'ULTIMATE' : `STAGE ${index}`}</span><span className="skill-cost">{index === 0 ? 'FREE' : <>{gauge}<i> / {skill.cost}</i></>}</span><b>{skill.name}</b><small>{skill.description}</small><span className="gauge-track"><i style={{ width: `${index === 0 ? 100 : Math.min(100, gauge / skill.cost * 100)}%` }} /></span>
+                <span className="skill-topline"><span className="skill-level">{index === 0 ? 'BASIC' : index === 3 ? 'ULTIMATE' : `STAGE ${index}`}</span><span className="skill-attribute"><i>{({ Light: '✦', Shadow: '◈', Ice: '❄', Fire: '♨', Sound: '♫', Earth: '⬟' })[skill.attribute]}</i>{skillAttributes} · {targetLabel}</span></span>
+                <b>{skill.name}</b>
+                <span className="skill-scale"><i>{skill.type.toUpperCase()} · {skill.power}%</i><strong>{index === 0 ? 'FREE' : `${gauge}/${skill.cost}`}</strong></span>
+                <small>{skill.description}</small>
+                <span className="gauge-pips" aria-label={index === 0 ? 'Basic skill, no charge required' : `${gauge} of ${skill.cost} charges`}>
+                  {Array.from({ length: Math.max(skill.cost, 1) }, (_, pip) => <i key={pip} className={index === 0 || pip < gauge ? 'filled' : ''} />)}
+                </span>
               </button>
             })}
           </div>}
@@ -657,8 +830,8 @@ function App() {
             {sortBySpeed(enemies).map((unit) => {
               const order = turnOrder.findIndex((candidate) => candidate.id === unit.id) + 1
               return <button key={unit.id} className={`unit-card enemy-unit ${unit.hp <= 0 ? 'fallen' : ''}`} onClick={() => { setSelectedEnemyId(unit.id); setModal('details') }}>
-                <div className="unit-card-top"><span className="turn-badge">{order ? `${order}${order === 1 ? 'st' : order === 2 ? 'nd' : order === 3 ? 'rd' : 'th'}` : '—'}</span><Avatar unit={unit} compact /><div className="unit-name-wrap"><b>{unit.name}</b><span>{unit.isBoss ? 'Act Boss' : unit.role}</span></div><span className="unit-hp-value">{unit.hp}</span></div>
-                <div className="unit-attributes"><AttributeBadge attributes={unit.attributes} /><span>ATK {unit.physAtk + unit.magAtk} · SPD {unit.spd}</span></div>
+                <div className="unit-card-top"><span className="turn-badge">{order ? `${order}${order === 1 ? 'st' : order === 2 ? 'nd' : order === 3 ? 'rd' : 'th'}` : '—'}</span><Avatar unit={unit} compact /><div className="unit-name-wrap"><b>{unit.name}</b><span>{unit.isBoss ? 'DUNGEON BOSS' : unit.role}</span></div><span className="unit-hp-value">{unit.hp}/{unit.maxHp}</span></div>
+                <div className="unit-attributes"><AttributeBadge attributes={unit.attributes} /><span>PHY {unit.physAtk} · MAG {unit.magAtk} · SPD {unit.spd}</span></div>
                 <HealthBar unit={unit} /><StatusMarks unit={unit} />
               </button>
             })}
@@ -668,19 +841,23 @@ function App() {
       </div>
 
       {modal && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && modal !== 'hostage' && modal !== 'camp') setModal(null) }}>
-        <section className={`dialog ${modal === 'details' ? 'details-dialog' : ''}`} role="dialog" aria-modal="true">
+        <section className={`dialog ${modal === 'details' ? 'details-dialog' : ''} ${modal === 'camp' ? 'camp-dialog' : ''}`} role="dialog" aria-modal="true">
           <button className="dialog-close" onClick={() => modal !== 'hostage' && modal !== 'camp' && setModal(null)} aria-label="Close"><X size={18} /></button>
-          {modal === 'details' && enemyDetails && <><div className="dialog-kicker">ENEMY INTELLIGENCE</div><div className="detail-hero"><Avatar unit={enemyDetails} /><div><AttributeBadge attributes={enemyDetails.attributes} /><h2>{enemyDetails.name}</h2><span>{enemyDetails.isBoss ? 'Act Boss' : enemyDetails.role}</span></div></div><p className="dialog-description">{enemyDetails.ability}</p><div className="detail-stats"><span><Heart size={14} /> HP <b>{enemyDetails.hp}/{enemyDetails.maxHp}</b></span><span><Swords size={14} /> ATK <b>{enemyDetails.physAtk + enemyDetails.magAtk}</b></span><span><Shield size={14} /> DEF <b>{enemyDetails.def}</b></span><span><Sparkles size={14} /> SPD <b>{enemyDetails.spd}</b></span></div><div className="enemy-ult"><span>ULTIMATE GAUGE</span><div className="gauge-track"><i style={{ width: `${Math.min(100, enemyDetails.gauge[0] / 4 * 100)}%` }} /></div><b>{enemyDetails.gauge[0]}/4</b></div><button className="gold-button" onClick={() => setModal(null)}>Understood</button></>}
-          {modal === 'camp' && <><div className="dialog-icon"><Sparkles size={24} /></div><div className="dialog-kicker">A MOMENT OF RESPITE</div><h2>{stage.title}</h2><p className="dialog-description">The road is quiet. How will your party spend this pause?</p><div className="camp-choices"><button onClick={() => chooseCamp('rest')}><Heart size={19} /><b>Rest at Campfire</b><span>Heal 50% HP and revive fallen heroes.</span></button><button onClick={() => chooseCamp('scavenge')}><Coins size={19} /><b>Scavenge Treasure</b><span>Find 100 gold for your journey.</span></button></div></>}
-          {modal === 'hostage' && <><div className="dialog-icon"><Sparkles size={24} /></div><div className="dialog-kicker">A CAGE UNLOCKED</div><h2>Someone needs a new party.</h2><p className="dialog-description">Freed companion {activeStage.hostages - hostagesLeft + 1} of {activeStage.hostages}. Make room in your roster or take the reward.</p><div className="hostage-recruit"><Avatar unit={recruits.find((unit) => !roster.some((hero) => hero.id === unit.id)) ?? heroes[0]} /><div><b>{recruits.find((unit) => !roster.some((hero) => hero.id === unit.id))?.name ?? 'A grateful traveler'}</b><span>New companion · full details in Team</span></div></div><div className="dialog-actions"><button className="gold-button" onClick={() => chooseHostage(true)}><Plus size={15} /> Recruit to Roster</button><button className="outline-button" onClick={() => chooseHostage(false)}><Coins size={15} /> Accept 60 Gold</button></div></>}
+          {modal === 'details' && enemyDetails && <><div className="dialog-kicker">ENEMY INTELLIGENCE</div><div className="detail-hero"><Avatar unit={enemyDetails} /><div><AttributeBadge attributes={enemyDetails.attributes} /><h2>{enemyDetails.name}</h2><span>{enemyDetails.isBoss ? 'DUNGEON BOSS' : enemyDetails.role}</span></div></div><p className="dialog-description"><b>PASSIVE · </b>{enemyDetails.ability}</p><div className="detail-stats"><span><Heart size={14} /> HP <b>{enemyDetails.hp}/{enemyDetails.maxHp}</b></span><span><Swords size={14} /> PHY ATK <b>{enemyDetails.physAtk}</b></span><span><Sparkles size={14} /> MAG ATK <b>{enemyDetails.magAtk}</b></span><span><Shield size={14} /> DEF <b>{enemyDetails.def}</b></span><span><ChevronRight size={14} /> SPD <b>{enemyDetails.spd}</b></span></div>
+            {enemyDetails.attributes.some((attribute) => [['Light', 'Shadow'], ['Ice', 'Fire'], ['Sound', 'Earth']].some((pair) => pair.includes(attribute) && pair.every((item) => enemyDetails.attributes.includes(item as Unit['attributes'][number])))) && <p className="dual-cancel-note">DUAL ATTRIBUTE · opposing weakness cancels to 1× damage.</p>}
+            <div className="enemy-skill-details"><div><b>BASIC · {enemyDetails.skills[0].name}</b><small>{enemyDetails.skills[0].description}</small></div><div><b>ULTIMATE · {enemyDetails.skills[3].name}</b><small>{enemyDetails.skills[3].description}</small></div></div>
+            <div className="enemy-ult"><span>ULTIMATE CHARGE</span><div className="gauge-track"><i style={{ width: `${Math.min(100, enemyDetails.gauge[0] / 4 * 100)}%` }} /></div><b>{enemyDetails.gauge[0]}/4</b></div><button className="gold-button" onClick={() => setModal(null)}>Understood</button></>}
+          {modal === 'camp' && <><div className="campfire-scene"><DungeonBackdrop key="campfire-rest" areaId="campfire-rest" /><span>♨</span></div><div className="dialog-kicker">A MOMENT OF RESPITE · STAGE {stage.number}</div><h2>{stage.title}</h2><p className="dialog-description">The road is quiet. Choose how your party spends this pause.</p><div className="camp-choices"><button onClick={() => chooseCamp('rest')}><Heart size={19} /><b>Rest at Campfire</b><span>Heal the whole party by 50% and revive fallen heroes.</span></button><button onClick={() => chooseCamp('scavenge')}><Coins size={19} /><b>Claim Hidden Cache</b><span>Find 100 gold for your journey.</span></button></div></>}
+          {modal === 'hostage' && <><div className="dialog-icon"><Sparkles size={24} /></div><div className="dialog-kicker">A CAGE UNLOCKED</div><h2>A new companion awaits.</h2><p className="dialog-description">Freed companion {activeStage.hostages - hostagesLeft + 1} of {activeStage.hostages}. Choose a place in your roster or accept 60 gold.</p>{(() => { const rescued = recruits.find((unit) => !roster.some((hero) => hero.id === unit.id)); return rescued ? <div className="hostage-recruit"><Avatar unit={rescued} /><div><b>{rescued.name}</b><span>{rescued.role} · {rescued.attributes.join(' / ')}</span><small>Passive: {rescued.ability}</small><small>{rescued.skills.map((skill) => skill.name).join(' · ')}</small></div></div> : <div className="hostage-recruit"><Avatar unit={heroes[0]} /><div><b>Your roster is complete</b><span>Accept gold to continue the descent.</span></div></div> })()}<div className="dialog-actions"><button className="gold-button" onClick={() => chooseHostage(true)}><Plus size={15} /> Recruit to Roster</button><button className="outline-button" onClick={() => chooseHostage(false)}><Coins size={15} /> Accept 60 Gold</button></div></>}
           {modal === 'shop' && <><div className="dialog-kicker">THE WAYFARER’S STALL · STAGE {stageNumber}</div><h2>Useful things, fair prices.</h2><p className="dialog-description">Stock refreshes at every stage. Supplies last until used.</p><div className="shop-list">{shopItems.map((item) => <div className="shop-row" key={item.id}><span className="shop-item-icon"><Sparkles size={16} /></span><div><b>{item.name}</b><small>{item.description}</small></div><button disabled={gold < item.cost || sold.includes(item.id)} onClick={() => buyItem(item.id)}>{sold.includes(item.id) ? 'SOLD' : <><Coins size={13} /> {item.cost}</>}</button></div>)}</div><div className="dialog-foot"><span><Coins size={14} /> Purse</span><b>{gold} G</b></div></>}
           {modal === 'items' && <><div className="dialog-kicker">YOUR PACK</div><h2>Carry a little magic.</h2><p className="dialog-description">{selectedUnitForItem === 'choose' ? `Choose a hero for ${pendingItem?.replaceAll('-', ' ') ?? 'this item'}.` : 'Select an item to use during this stage.'}</p><div className="inventory-list">{shopItems.map((item) => <button key={item.id} disabled={items[item.id] < 1} className="inventory-row" onClick={() => handleInventoryItem(item.id)}><span className="inventory-count">{items[item.id]}</span><span><b>{item.name}</b><small>{item.description}</small></span><ChevronRight size={15} /></button>)}</div>{selectedUnitForItem && <div className="item-targets"><b>USE ON</b>{party.map((unit) => <button key={unit.id} disabled={pendingItem === 'revive-feather' ? unit.hp > 0 : unit.hp <= 0} onClick={() => { setSelectedUnitForItem(unit.id); setMessage(`${unit.name} selected.`) }} className={selectedUnitForItem === unit.id ? 'picked' : ''}><Avatar unit={unit} compact />{unit.name} <small>{unit.hp}/{unit.maxHp}</small></button>)}</div>}</>}
-          {modal === 'team' && <><div className="dialog-kicker">COMPANY & FORMATION</div><h2>Every legend needs a team.</h2><p className="dialog-description">Select a squad member to change rows. Select a bench hero, then a squad member, to swap.</p><div className="formation-summary"><span>FRONT <small>Tank +25% DEF · Assassin +20% ATK</small></span><span>BACK <small>Attacker +20% ATK · Mage +20% MATK · Healer +25% heal</small></span></div><div className="team-roster">{roster.map((unit) => { const inTeam = teamIds.includes(unit.id); const bonus = formationBonus(unit); return <button key={unit.id} className={`team-member ${inTeam ? 'in-team' : ''} ${selectedTeamSwapId === unit.id ? 'swap-selected' : ''} ${unit.hp <= 0 ? 'fallen' : ''}`} onClick={() => chooseTeamMember(unit)}><Avatar unit={unit} compact /><span className="team-member-info"><b>{unit.name}</b><small>{unit.role} · {unit.attributes.join('/')}</small><small>Passive: {unit.ability}</small><small>Skills: {unit.skills.map((skill) => skill.name).join(' · ')}</small></span><span className="team-member-stats">HP {unit.hp}/{unit.maxHp}<small>ATK {unit.physAtk + unit.magAtk} · DEF {unit.def} · SPD {unit.spd}</small>{inTeam && <i>{unit.row} {bonus.phys ? '· +20% ATK' : bonus.def ? '· +25% DEF' : bonus.mag ? '· +20% MATK' : bonus.heal ? '· +25% heal' : ''}</i>}</span><span className="team-marker">{inTeam ? 'IN PARTY' : 'BENCH'}</span></button> })}</div><div className="dialog-actions"><button className="gold-button" onClick={() => { setModal(null); setSelectedTeamSwapId(null) }}>Done · {teamIds.length}/5 <ChevronRight size={15} /></button></div></>}
-          {modal === 'team' && <div className="team-enemies"><b>CURRENT ENEMIES</b>{enemies.map((unit) => <div key={unit.id}><Avatar unit={unit} compact /><span><b>{unit.name}</b><small>{unit.role} · {unit.attributes.join(' / ')} · {unit.hp}/{unit.maxHp} HP</small><small>ATK {unit.physAtk + unit.magAtk} · DEF {unit.def} · SPD {unit.spd} · {unit.ability}</small><small>{unit.skills.map((skill) => skill.name).join(' · ')}</small></span></div>)}</div>}
+          {modal === 'team' && <><div className="dialog-kicker">COMPANY & FORMATION</div><h2>Your team, your tactics.</h2><p className="dialog-description">Click a squad member to change rows. Select a bench hero and a squad member to swap; dragging also works.</p><div className="team-tabs" role="tablist" aria-label="Team manager sections"><button role="tab" aria-selected={teamTab === 'squad'} className={teamTab === 'squad' ? 'active' : ''} onClick={() => setTeamTab('squad')}>YOUR SQUAD & BENCH</button><button role="tab" aria-selected={teamTab === 'enemies'} className={teamTab === 'enemies' ? 'active' : ''} onClick={() => setTeamTab('enemies')}>STAGE ENEMIES ({enemies.length})</button></div>
+            {teamTab === 'squad' ? <><div className="formation-summary"><span>FRONT ROW <small>Tank +25% DEF · Assassin +20% Physical ATK</small></span><span>BACK ROW <small>Attacker +20% Physical ATK · Mage +20% Magic ATK · Healer +25% Healing</small></span></div><div className="team-roster">{roster.map((unit) => { const inTeam = teamIds.includes(unit.id); const bonus = formationBonus(unit); return <button key={unit.id} draggable={!inTeam} onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', unit.id); setSelectedTeamSwapId(unit.id) }} onDragOver={(event) => { if (inTeam) event.preventDefault() }} onDrop={(event) => { event.preventDefault(); dropTeamMember(unit, event.dataTransfer.getData('text/plain')) }} className={`team-member ${inTeam ? 'in-team' : ''} ${selectedTeamSwapId === unit.id ? 'swap-selected' : ''} ${unit.hp <= 0 ? 'fallen' : ''}`} onClick={() => chooseTeamMember(unit)}><Avatar unit={unit} compact /><span className="team-member-info"><b>{unit.name}</b><small>{unit.role} · {unit.attributes.join('/')}</small><small>Passive: {unit.ability}</small><small>Skills: {unit.skills.map((skill) => skill.name).join(' · ')}</small></span><span className="team-member-stats">HP {unit.hp}/{unit.maxHp}<small>PHY {unit.physAtk} · MAG {unit.magAtk} · DEF {unit.def} · SPD {unit.spd}</small>{inTeam && <i>{unit.row} {bonus.phys ? '· +20% ATK' : bonus.def ? '· +25% DEF' : bonus.mag ? '· +20% MATK' : bonus.heal ? '· +25% heal' : '· no row bonus'}</i>}</span><span className="team-marker">{inTeam ? 'IN PARTY' : 'BENCH'}</span></button> })}</div></> : <div className="team-enemies">{enemies.length ? enemies.map((unit) => <article key={unit.id}><Avatar unit={unit} compact /><span><b>{unit.name}</b><small>{unit.role} · {unit.attributes.join(' / ')} · {unit.hp}/{unit.maxHp} HP</small><small>PHY ATK {unit.physAtk} · MAG ATK {unit.magAtk} · DEF {unit.def} · SPD {unit.spd}</small><small>PASSIVE · {unit.ability}</small><small>BASIC · {unit.skills[0].name} — {unit.skills[0].description}</small><small>ULTIMATE · {unit.skills[3].name} — {unit.skills[3].description}</small></span></article>) : <p className="dialog-description">There are no enemies at this camp.</p>}</div>}
+            <div className="dialog-actions"><button className="gold-button" onClick={() => { setModal(null); setSelectedTeamSwapId(null) }}>Done · {teamIds.length}/5 <ChevronRight size={15} /></button></div></>}
         </section>
       </div>}
 
-      {cutIn && <div className={`ultimate-cutin ${cutIn.isBoss ? 'boss-cutin' : ''}`}><div className="cutin-flash" /><Avatar unit={cutIn} /><div><span>{cutIn.isBoss ? 'ANCIENT POWER AWAKENS' : 'HEROIC ULTIMATE'}</span><h2>{cutIn.name}</h2><b>{cutIn.skills[3].name}</b></div><i>✦</i></div>}
+      {cutIn && <div className={`ultimate-cutin ${cutIn.isBoss ? 'boss-cutin' : ''}`}><div className="cutin-flash" /><UnitSprite unit={cutIn} combat /><div><span>{cutIn.isBoss ? 'BOSS ULTIMATE' : 'HEROIC ULTIMATE'}</span><h2>{cutIn.name}</h2><b>{cutIn.skills[3].name}</b></div><i>✦</i></div>}
     </main>
   )
 }

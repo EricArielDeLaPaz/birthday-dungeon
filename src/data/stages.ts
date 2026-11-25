@@ -1,21 +1,70 @@
-export type Stage = { number: number; act: number; kind: 'fight' | 'camp' | 'boss'; title: string; enemies: string[]; hostages: number; reward: number; description: string }
+export type DungeonArea = {
+  id: string
+  name: string
+}
 
-export const stages: Stage[] = [
-  { number: 1, act: 1, kind: 'fight', title: 'The Mossgate', enemies: ['goblin-guard', 'shade-stalker'], hostages: 1, reward: 45, description: 'A lantern-lit path into the old wood.' },
-  { number: 2, act: 1, kind: 'fight', title: 'Foxfire Hollow', enemies: ['ember-adept', 'iron-hound', 'goblin-guard'], hostages: 1, reward: 50, description: 'Blue foxfire dances between the roots.' },
-  { number: 3, act: 1, kind: 'camp', title: 'Mosslight Camp', enemies: [], hostages: 0, reward: 0, description: 'A quiet clearing beneath ancient boughs.' },
-  { number: 4, act: 1, kind: 'fight', title: 'The Broken Shrine', enemies: ['moss-priest', 'shade-stalker', 'iron-hound'], hostages: 2, reward: 60, description: 'A forgotten shrine stirs with restless life.' },
-  { number: 5, act: 1, kind: 'boss', title: 'Cinder Throne', enemies: ['ignis-rex', 'emberling', 'emberling'], hostages: 0, reward: 100, description: 'Ignis Rex, the crowned flame.' },
-  { number: 6, act: 2, kind: 'fight', title: 'Singing Steps', enemies: ['shade-stalker', 'moss-priest', 'goblin-guard'], hostages: 1, reward: 60, description: 'The mountain echoes your every footfall.' },
-  { number: 7, act: 2, kind: 'fight', title: 'The Rattlepass', enemies: ['iron-hound', 'ember-adept', 'shade-stalker', 'goblin-guard'], hostages: 1, reward: 65, description: 'Loose stones roll in time with a distant hum.' },
-  { number: 8, act: 2, kind: 'camp', title: 'Echo Camp', enemies: [], hostages: 0, reward: 0, description: 'Warm tea and stillness before the summit.' },
-  { number: 9, act: 2, kind: 'fight', title: 'The Resonant Vault', enemies: ['moss-priest', 'iron-hound', 'ember-adept'], hostages: 2, reward: 75, description: 'A sealed vault thrums behind the stone.' },
-  { number: 10, act: 2, kind: 'boss', title: 'Heart of the Mountain', enemies: ['resonance-golem'], hostages: 0, reward: 130, description: 'Two ancient elements, one unyielding will.' },
-  { number: 11, act: 3, kind: 'fight', title: 'The Starless Road', enemies: ['shade-stalker', 'ember-adept', 'iron-hound'], hostages: 1, reward: 75, description: 'The sky dims as the dungeon climbs.' },
-  { number: 12, act: 3, kind: 'fight', title: 'Prismfall', enemies: ['moss-priest', 'shade-stalker', 'emberling', 'iron-hound'], hostages: 1, reward: 80, description: 'Fragments of starlight fall like snow.' },
-  { number: 13, act: 3, kind: 'camp', title: 'Last Hearth', enemies: [], hostages: 0, reward: 0, description: 'One last fire burns against the dark.' },
-  { number: 14, act: 3, kind: 'fight', title: 'The Eclipse Gate', enemies: ['ember-adept', 'shade-stalker', 'moss-priest', 'iron-hound'], hostages: 3, reward: 90, description: 'Beyond this gate waits the final hour.' },
-  { number: 15, act: 3, kind: 'boss', title: 'The Last Eclipse', enemies: ['eclipse-sovereign'], hostages: 0, reward: 200, description: 'The Sovereign waits beneath an empty sky.' },
+export const dungeonAreas: DungeonArea[] = [
+  { id: 'mossbound-crypt', name: 'Mossbound Crypt' },
+  { id: 'ashen-ossuary', name: 'Ashen Ossuary' },
+  { id: 'sunken-catacombs', name: 'Sunken Catacombs' },
+  { id: 'echoing-vault', name: 'Echoing Vault' },
+  { id: 'starless-nave', name: 'Starless Nave' },
+  { id: 'eclipse-throne', name: 'Eclipse Throne' },
 ]
 
-export const actNames = ['Whispering Wilds', 'Resonant Peaks', 'Eclipse Citadel']
+export type Stage = {
+  number: number
+  areaId: string
+  areaName: string
+  kind: 'fight' | 'camp' | 'boss'
+  title: string
+  enemies: string[]
+  hostages: number
+  reward: number
+  description: string
+}
+
+const areaAt = (stage: number) => {
+  const area = dungeonAreas.find((entry) => {
+    const [first, last] = areaRanges[entry.id]
+    return stage >= first && stage <= last
+  })!
+  return { areaId: area.id, areaName: area.name }
+}
+
+const areaRanges: Record<string, [number, number]> = {
+  'mossbound-crypt': [1, 3],
+  'ashen-ossuary': [4, 5],
+  'sunken-catacombs': [6, 8],
+  'echoing-vault': [9, 10],
+  'starless-nave': [11, 13],
+  'eclipse-throne': [14, 15],
+}
+
+const stage = (
+  number: number,
+  kind: Stage['kind'],
+  title: string,
+  enemies: string[],
+  hostages: number,
+  reward: number,
+  description: string,
+): Stage => ({ number, ...areaAt(number), kind, title, enemies, hostages, reward, description })
+
+export const stages: Stage[] = [
+  stage(1, 'fight', 'The Rootbound Gate', ['minion-crypt-knight', 'minion-dread-stalker'], 1, 45, 'Moss-covered stone gives way beneath the old forest.'),
+  stage(2, 'camp', 'Lantern Rest', [], 0, 0, 'A sheltered fire glows beneath the roots.'),
+  stage(3, 'fight', 'The Green Sepulcher', ['minion-ash-cultist', 'minion-bone-archer', 'minion-plague-cantor'], 2, 55, 'A burial chamber stirs with thorn and ash.'),
+  stage(4, 'fight', 'Pillars of the Unquiet', ['minion-crypt-knight', 'minion-dread-stalker', 'minidragon-fire'], 1, 65, 'Bone pillars crowd a hall of smoldering braziers.'),
+  stage(5, 'boss', 'Vaelgor’s Ossuary', ['boss-bone-dragon', 'minidragon-fire', 'minidragon-ice', 'minidragon-earth'], 0, 120, 'The Bone Dragon descends with its three surviving brood.'),
+  stage(6, 'fight', 'The Drowned Stair', ['minion-plague-cantor', 'minion-dread-stalker', 'minidragon-ice'], 1, 65, 'Black water laps at stairs sunk beneath the earth.'),
+  stage(7, 'fight', 'The Silted Reliquary', ['minion-crypt-knight', 'minion-bone-archer', 'minion-ash-cultist', 'minidragon-earth'], 2, 75, 'Relics glimmer below the flooded flagstones.'),
+  stage(8, 'camp', 'The Dry Bell', [], 0, 0, 'A raised stone island offers a rare, dry place to rest.'),
+  stage(9, 'fight', 'The Listening Gallery', ['minion-dread-stalker', 'minion-plague-cantor', 'minidragon-sound'], 1, 80, 'Whispering echoes travel through the drowned vault.'),
+  stage(10, 'boss', 'The Resonant Heart', ['boss-choir-monolith', 'minion-crypt-knight', 'minion-plague-cantor'], 0, 145, 'A monolith sings through the stone, shielded by its keepers.'),
+  stage(11, 'fight', 'The Astral Ossuary', ['minion-bone-archer', 'minion-ash-cultist', 'minion-dread-stalker'], 1, 80, 'Starless constellations mark the walls above the dead.'),
+  stage(12, 'camp', 'Wayfarer’s Ember', [], 0, 0, 'One last quiet hearth burns before the upper nave.'),
+  stage(13, 'fight', 'The Choirless Nave', ['minion-plague-cantor', 'minion-crypt-knight', 'minidragon-light'], 2, 90, 'An empty cathedral waits beneath a hollow sky.'),
+  stage(14, 'fight', 'The Eclipse Threshold', ['minion-ash-cultist', 'minion-dread-stalker', 'minion-bone-archer', 'minidragon-fire'], 3, 100, 'The last guards stand beneath the eclipsed arch.'),
+  stage(15, 'boss', 'The Eclipse Throne', ['boss-eclipse-seraph'], 0, 220, 'Nyx-Aurelia waits alone where light and shadow meet.'),
+]
