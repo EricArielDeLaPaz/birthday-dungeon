@@ -4,11 +4,11 @@ export type ItemId = 'healing-potion' | 'cleanse-herb' | 'valor-tonic' | 'ironba
 export type ShopItem = { id: ItemId; name: string; cost: number; description: string }
 
 export const shopItems: ShopItem[] = [
-  { id: 'healing-potion', name: 'Healing Potion', cost: 35, description: 'Restore 30% of max HP.' },
-  { id: 'cleanse-herb', name: 'Cleanse Herb', cost: 30, description: 'Remove Burn, Curse, or DEF Down.' },
-  { id: 'valor-tonic', name: 'Valor Tonic', cost: 45, description: '+25% ATK for this stage.' },
-  { id: 'ironbark-draught', name: 'Ironbark Draught', cost: 45, description: '+25% DEF for this stage.' },
-  { id: 'revive-feather', name: 'Revive Feather', cost: 65, description: 'Revive with 30% HP.' },
+  { id: 'healing-potion', name: 'Healing Potion', cost: 70, description: 'Restore 30% of max HP.' },
+  { id: 'cleanse-herb', name: 'Cleanse Herb', cost: 60, description: 'Remove Burn, Curse, or DEF Down.' },
+  { id: 'valor-tonic', name: 'Valor Tonic', cost: 90, description: '+25% ATK for this stage.' },
+  { id: 'ironbark-draught', name: 'Ironbark Draught', cost: 90, description: '+25% DEF for this stage.' },
+  { id: 'revive-feather', name: 'Revive Feather', cost: 130, description: 'Revive with 30% HP.' },
 ]
 
 export function applyItem(unit: Unit, item: ItemId): Unit {

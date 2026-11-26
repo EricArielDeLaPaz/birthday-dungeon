@@ -1,7 +1,21 @@
 import type { Attribute, Role, Skill, Unit } from '../engine/combat'
 
-const skill = (name: string, cost: number, power: number, attribute: Attribute, type: Skill['type'], target: Skill['target'], description: string, effect?: Skill['effect'], selfEffect?: Skill['selfEffect']): Skill =>
-  ({ name, cost, power, attribute, type, target, description, effect, selfEffect })
+const conciseDescription = (power: number, type: Skill['type'], target: Skill['target'], effect?: Skill['effect'], selfEffect?: Skill['selfEffect']) => {
+  const targetName = target === 'all-enemies' ? 'all enemies' : target === 'all-allies' ? 'all allies' : target === 'ally' ? 'one ally' : '1 enemy'
+  const description = type === 'heal'
+    ? power > 0 ? `Heals ${targetName} by ${power}% of Max HP.` : `Supports ${targetName}.`
+    : `Deals ${power}% ${type === 'physical' ? 'Phys' : 'Mag'} ATK to ${targetName}.`
+  const effects = [effect, selfEffect].flatMap((value) => value ? Array.isArray(value) ? value : [value] : [])
+  const effectText = [...new Set(effects)].map((kind) => kind === 'Stealth'
+    ? 'Grants Stealth for 2 turns (evades attacks).'
+    : kind === 'ATK Up' || kind === 'DEF Up'
+      ? `Grants ${kind} (2t).`
+      : `Inflicts ${kind} (2t).`)
+  return [description, ...effectText].join(' ')
+}
+
+const skill = (name: string, cost: number, power: number, attribute: Attribute, type: Skill['type'], target: Skill['target'], _description: string, effect?: Skill['effect'], selfEffect?: Skill['selfEffect']): Skill =>
+  ({ name, cost, power, attribute, type, target, description: conciseDescription(power, type, target, effect, selfEffect), effect, selfEffect })
 
 const makeHero = (hero: Omit<Unit, 'statuses' | 'gauge'>): Unit => ({
   ...hero, statuses: [], gauge: [0, 0, 0],

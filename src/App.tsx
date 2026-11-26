@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   ArrowLeft, Backpack, ChevronRight, Coins, Heart, Plus,
   Shield, ShoppingBag, Sparkles, Swords, UsersRound, X,
@@ -7,16 +7,27 @@ import './App.css'
 import { assetMap, DUNGEON_BACKGROUNDS } from './data/assetMap'
 import { BIRTHDAY_CONFIG } from './data/birthdayConfig'
 import { createEnemy } from './data/enemies'
+import { ENEMY_SLOTS, PLAYER_SLOTS } from './data/formationSlots'
 import { heroes, recruits } from './data/heroes'
 import { shopItems, applyItem, type ItemId } from './data/items'
 import { stages, type Stage } from './data/stages'
 import {
   addStatus, calculateDamage, chargeGauge, expireStageBuffs, formationBonus,
-  getTargetId, sortBySpeed, tickStatuses, type FloatingText, type Skill, type Unit,
+  getTargetId, opposingAttribute, sortBySpeed, tickStatuses, type FloatingText, type Skill, type Unit,
 } from './engine/combat'
 
-type Modal = 'shop' | 'team' | 'items' | 'details' | 'hostage' | 'camp' | null
+type Modal = 'shop' | 'team' | 'items' | 'details' | 'hostage' | 'hostage-details' | 'camp' | 'chart' | null
 type TeamTab = 'squad' | 'enemies'
+type VfxEvent = {
+  id: number
+  attribute: Unit['attributes'][number]
+  intensity: 'basic' | 'stage1' | 'stage2' | 'ultimate' | 'heal'
+  targetIds: string[]
+  actorId: string
+  targetSide: 'heroes' | 'enemies'
+  targetMode: 'single' | 'aoe'
+  destination: { x: number; y: number }
+}
 type SavedRun = {
   stageNumber: number
   gold: number
@@ -26,6 +37,7 @@ type SavedRun = {
   turns: number
   enemies?: Unit[]
   hostagesLeft?: number
+  hostageOfferIds?: string[]
   enemyTurnIndex?: number
   sold?: ItemId[]
 }
@@ -34,13 +46,25 @@ const initialItems: Record<ItemId, number> = {
 }
 
 function randomEnemyGroup(stage: Stage) {
-  return stage.enemies.map((id, index) => createEnemy(id, index))
+  const statScale = stage.number === 1 ? 0.9 : 1.5
+  return stage.enemies.map((id, index) => {
+    const unit = createEnemy(id, index)
+    const maxHp = Math.round(unit.maxHp * statScale)
+    return {
+      ...unit,
+      hp: maxHp,
+      maxHp,
+      def: Math.round(unit.def * 1.15),
+    }
+  })
 }
 
 function makeDefaultParty(starterId: string): { roster: Unit[]; teamIds: string[] } {
-  const roster = heroes.map((unit) => ({ ...unit, statuses: [], gauge: [0, 0, 0] as Unit['gauge'], passiveUsed: false, row: unit.id === 'bram' || unit.id === 'kaelen' ? 'Front' as const : 'Back' as const }))
-  const ordered = [starterId, ...roster.map((unit) => unit.id).filter((id) => id !== starterId)]
-  return { roster: ordered.map((id) => roster.find((unit) => unit.id === id)!), teamIds: ordered }
+  const starter = heroes.find((unit) => unit.id === starterId)
+  if (!starter) throw new Error(`Unknown starter hero: ${starterId}`)
+  const row: 'Front' | 'Back' = starter.role === 'Tank' || starter.role === 'Assassin' ? 'Front' : 'Back'
+  const initialHero = { ...starter, statuses: [], gauge: [0, 0, 0] as Unit['gauge'], passiveUsed: false, row }
+  return { roster: [initialHero], teamIds: [starter.id] }
 }
 
 function prepareBattleRoster(roster: Unit[], teamIds: string[]) {
@@ -55,10 +79,30 @@ function firstLivingHero(roster: Unit[], teamIds: string[]) {
     .filter((unit): unit is Unit => unit !== undefined && unit.hp > 0))[0]
 }
 
-function UnitSprite({ unit, compact = false, combat = false }: { unit: Unit; compact?: boolean; combat?: boolean }) {
+function unitBattlePosition(unit: Unit, units: Unit[], side: 'heroes' | 'enemies') {
+  const living = units.filter((candidate) => candidate.hp > 0)
+  if (side === 'heroes') {
+    const row = unit.row ?? 'Back'
+    const rowSlots = PLAYER_SLOTS.filter((slot) => slot.row === row.toLowerCase())
+    const rowIndex = living.filter((candidate) => (candidate.row ?? 'Back') === row)
+      .findIndex((candidate) => candidate.id === unit.id)
+    const slot = rowSlots[Math.max(rowIndex, 0) % rowSlots.length]
+    return { x: slot.x, y: slot.y }
+  }
+  const bossWithMinions = units.some((candidate) => candidate.isBoss) && units.some((candidate) => !candidate.isBoss)
+  if (unit.isBoss && !bossWithMinions) return { x: 73, y: 52 }
+  if (unit.isBoss) return { x: 84, y: 52 }
+  const index = living.filter((candidate) => !candidate.isBoss).findIndex((candidate) => candidate.id === unit.id)
+  const slots = ENEMY_SLOTS.filter((slot) => !bossWithMinions || slot.slot !== 3)
+  const slot = slots[Math.max(index, 0) % slots.length]
+  return { x: slot.x, y: slot.y }
+}
+
+function UnitSprite({ unit, compact = false, combat = false, facing }: { unit: Unit; compact?: boolean; combat?: boolean; facing?: 'left' | 'right' }) {
   const assetId = unit.id.replace(/-\d+$/, '')
   const art = assetMap[assetId] ?? { accent: '#C9A45C', glyph: '✦', scale: 1, footOffsetPx: 4 }
-  const sprite = combat ? art.combatIllustrationUrl : art.pixelSpriteUrl
+  const sprite = combat ? art.combatIllustrationUrl ?? art.pixelSpriteUrl : art.pixelSpriteUrl
+  const flipSprite = facing === 'left' ? !art.flipX : Boolean(art.flipX)
   const [failedSprite, setFailedSprite] = useState<string | null>(null)
   const failed = failedSprite === sprite
   const boss = assetId.startsWith('boss-')
@@ -67,8 +111,8 @@ function UnitSprite({ unit, compact = false, combat = false }: { unit: Unit; com
   const ink = '#171a20'
   return (
     <span className={`avatar ${compact ? 'avatar-small' : ''} ${combat ? 'combat-avatar' : ''} ${boss ? 'sprite-boss' : ''} ${dragon ? 'sprite-dragon' : ''}`} style={{ '--avatar-accent': accent, '--sprite-scale': art.scale } as React.CSSProperties} aria-hidden="true">
-      {sprite && !failed && <img src={sprite} alt="" onError={(event) => setFailedSprite(event.currentTarget.getAttribute('src') ?? '')} />}
-      {(!sprite || failed) && <svg className="pixel-sprite procedural-sprite" viewBox="0 0 120 150" shapeRendering="crispEdges" aria-hidden="true">
+      {sprite && !failed && <img className={flipSprite ? 'sprite-flipped' : ''} src={sprite} alt="" onError={(event) => setFailedSprite(event.currentTarget.getAttribute('src') ?? '')} />}
+      {(!sprite || failed) && <svg className={`pixel-sprite procedural-sprite ${flipSprite ? 'sprite-flipped' : ''}`} viewBox="0 0 120 150" shapeRendering="crispEdges" aria-hidden="true">
         <ellipse cx="60" cy="142" rx="34" ry="5" fill="#090b0f" opacity=".7" />
         {assetId === 'boss-bone-dragon' ? <>
           <path d="M56 59 11 15 19 50 5 39 22 75 44 87M64 59l45-44-8 35 14-11-17 36-22 8" fill="#d4c9ac" stroke={ink} strokeWidth="4" />
@@ -149,10 +193,25 @@ function HealthBar({ unit }: { unit: Unit }) {
   return <div className="health-track" aria-label={`${unit.hp} of ${unit.maxHp} health`}><span className={tone} style={{ width: `${percent}%` }} /></div>
 }
 
+function BattleVfxOverlay({ attribute, intensity, targetMode }: { attribute: Unit['attributes'][number]; intensity: VfxEvent['intensity']; targetMode: VfxEvent['targetMode'] }) {
+  return <span className={`battle-vfx vfx-${attribute.toLowerCase()} vfx-${intensity}`} aria-hidden="true">
+    <svg viewBox="0 0 100 100" focusable="false">
+      {attribute === 'Fire' && <g><path d="M50 8 58 38 78 21 70 48 94 45 72 61 91 78 63 69 54 96 45 69 18 82 35 60 8 48 39 45 29 20 48 39Z" /><circle cx="50" cy="50" r="18" /></g>}
+      {attribute === 'Ice' && <g><path d="M50 5 60 36 87 18 69 43 98 50 68 58 87 82 60 65 50 95 40 65 13 82 32 58 3 50 32 43 13 18 40 36Z" /><path d="m25 25 50 50m0-50L25 75" /></g>}
+      {attribute === 'Shadow' && <g><path d="M10 28 88 8 37 47 95 42 17 70 68 54 8 92" /><path d="M22 18 77 13M25 83l53-20" /></g>}
+      {attribute === 'Light' && <g><path d="m50 3 10 31 32-16-16 32 31 10-31 10 16 32-32-16-10 31-10-31L8 102l16-32-31-10 31-10L8 18l32 16Z" /><circle cx="50" cy="50" r="17" /></g>}
+      {attribute === 'Sound' && <g><circle cx="50" cy="50" r="15" /><circle cx="50" cy="50" r="30" /><circle cx="50" cy="50" r="45" /></g>}
+      {attribute === 'Earth' && <g><path d="m4 84 19-44 15 24 15-54 18 52 13-27 12 49Z" /><path d="M8 92h84" /></g>}
+      {intensity === 'ultimate' && (targetMode === 'aoe'
+        ? <g className="ultimate-rings"><circle cx="50" cy="50" r="22" /><circle cx="50" cy="50" r="38" /><path d="M8 50h84M50 8v84M20 20l60 60m0-60L20 80" /></g>
+        : <g className="ultimate-finisher"><path d="M15 15 85 85M85 15 15 85M50 0v100M0 50h100" /><path d="M50 12 62 42 92 50 62 58 50 88 38 58 8 50 38 42Z" /></g>)}
+    </svg>
+  </span>
+}
+
 function StatusMarks({ unit }: { unit: Unit }) {
   if (!unit.statuses.length) return null
-  const marks: Record<string, string> = { Burn: 'BRN', Curse: 'CUR', Taunt: 'TAU', Stealth: 'STL', 'ATK Up': 'ATK+', 'DEF Up': 'DEF+', 'DEF Down': 'DEF−' }
-  return <div className="status-marks">{unit.statuses.map((status) => <span key={status.kind} title={`${status.kind}, ${status.turns} turns`}>{marks[status.kind]}</span>)}</div>
+  return <div className="status-marks">{unit.statuses.map((status) => <span key={status.kind} title={`${status.kind}, ${status.turns} turns`}>{status.kind}</span>)}</div>
 }
 
 function FormationPad({
@@ -161,8 +220,10 @@ function FormationPad({
   activeHeroId,
   selectedEnemyId,
   targetType,
+  actingUnitId,
   floating,
   animatingUnitId,
+  vfxEvent,
   onSelect,
 }: {
   side: 'heroes' | 'enemies'
@@ -170,38 +231,56 @@ function FormationPad({
   activeHeroId: string | null
   selectedEnemyId: string | null
   targetType: Skill['target'] | null
+  actingUnitId: string | null
   floating: FloatingText[]
   animatingUnitId: string | null
+  vfxEvent: VfxEvent | null
   onSelect: (unit: Unit) => void
 }) {
   const isEnemyPad = side === 'enemies'
-  const livingUnits = units.filter((unit) => unit.hp > 0)
+  const formationSlots = isEnemyPad ? ENEMY_SLOTS : PLAYER_SLOTS
+  const livingUnits = units.filter((unit) => unit.hp > 0 || vfxEvent?.targetIds.includes(unit.id))
+  const bossWithMinions = isEnemyPad && units.some((unit) => unit.isBoss) && units.some((unit) => !unit.isBoss)
+  const bossSolo = isEnemyPad && !bossWithMinions && livingUnits.length === 1 && livingUnits[0].isBoss
+  const enemyMinionSlots = ENEMY_SLOTS.filter((slot) => !bossWithMinions || slot.slot !== 3)
   const placed = livingUnits.map((unit, index) => {
-    const row = isEnemyPad ? (index < 2 ? 'Front' : 'Back') : unit.row ?? 'Back'
-    const rowIndex = livingUnits.filter((candidate, candidateIndex) => {
-      const candidateRow = isEnemyPad ? (candidateIndex < 2 ? 'Front' : 'Back') : candidate.row ?? 'Back'
-      return candidateRow === row
-    }).findIndex((candidate) => candidate.id === unit.id)
-    const coordinates = row === 'Front'
-      ? [{ x: 27, y: 76 }, { x: 72, y: 78 }]
-      : [{ x: 12, y: 43 }, { x: 50, y: 40 }, { x: 88, y: 43 }]
-    const position = coordinates[rowIndex % coordinates.length]
-    return { unit, row, position }
+    let placement: { row: 'Front' | 'Back'; x: number; y: number; zIndex: number }
+    if (isEnemyPad) {
+      if (bossSolo) {
+        placement = { row: 'Back', x: 73, y: 52, zIndex: 30 }
+      } else if (unit.isBoss && bossWithMinions) {
+        const slot = ENEMY_SLOTS[3]
+        placement = { row: 'Back', x: slot.x, y: slot.y, zIndex: slot.zIndex }
+      } else {
+        const minionIndex = livingUnits.slice(0, index).filter((candidate) => !candidate.isBoss).length
+        const slot = bossWithMinions
+          ? enemyMinionSlots[minionIndex]
+          : ENEMY_SLOTS[index]
+        placement = {
+          row: slot.row === 'front' ? 'Front' : 'Back',
+          x: slot.x,
+          y: slot.y,
+          zIndex: slot.zIndex,
+        }
+      }
+    } else {
+      const row = unit.row ?? 'Back'
+      const rowSlots = PLAYER_SLOTS.filter((slot) => slot.row === row.toLowerCase())
+      const rowIndex = livingUnits.filter((candidate) => (candidate.row ?? 'Back') === row)
+        .findIndex((candidate) => candidate.id === unit.id)
+      const slot = rowSlots[rowIndex % rowSlots.length]
+      placement = { row, x: slot.x, y: slot.y, zIndex: slot.zIndex }
+    }
+    return { unit, ...placement }
   })
 
   return (
     <div className={`formation-pad ${isEnemyPad ? 'enemy-formation' : 'player-formation'}`}>
-      <div className="pad-heading">{isEnemyPad ? 'HOSTILE FORMATION' : 'YOUR FORMATION'}</div>
-      <div className="pad-row-label front-row-label"><Shield size={12} /> FRONT ROW</div>
-      <div className="pad-row-label back-row-label"><Sparkles size={12} /> BACK ROW</div>
-      <div className="formation-lane-divider" />
-      {[
-        { row: 'Front', positions: [{ x: 27, y: 76 }, { x: 72, y: 78 }] },
-        { row: 'Back', positions: [{ x: 12, y: 43 }, { x: 50, y: 40 }, { x: 88, y: 43 }] },
-      ].flatMap(({ row, positions }) => positions.map((position, index) => (
-        <span key={`${row}-${index}`} className={`pad-circle circle-${row.toLowerCase()}`} style={{ left: `${position.x}%`, top: `${position.y}%` }} />
-      )))}
-      {placed.map(({ unit, row, position }) => {
+      {formationSlots.filter((slot) => !bossSolo || slot.slot !== 3).map((slot) => {
+        const row = slot.row === 'front' ? 'Front' : 'Back'
+        return <span key={slot.slot} className={`pad-circle circle-${row.toLowerCase()}`} style={{ left: `${slot.x}%`, top: `${slot.y}%`, zIndex: slot.zIndex }} />
+      })}
+      {placed.map(({ unit, row, x, y, zIndex }) => {
         const isHero = !isEnemyPad
         const isValidTarget = targetType && (
           (isHero && (targetType === 'ally' || targetType === 'all-allies')) ||
@@ -214,16 +293,17 @@ function FormationPad({
           <button
             type="button"
             key={unit.id}
-            className={`pad-unit ${isEnemyPad ? 'foe-unit' : 'ally-unit'} ${unit.isBoss ? 'boss-unit' : ''} ${roleMatch ? 'row-bonus' : ''} ${activeHeroId === unit.id || selectedEnemyId === unit.id ? 'selected' : ''} ${isValidTarget ? 'target-valid' : ''} ${animatingUnitId === unit.id ? 'animating' : ''}`}
-            style={{ left: `${position.x}%`, top: `${position.y}%`, '--unit-accent': asset?.accent ?? '#C9A45C', '--foot-offset': `${asset?.footOffsetPx ?? 4}px`, '--sprite-scale': asset?.scale ?? 1 } as React.CSSProperties}
-            onClick={() => onSelect(unit)}
+            className={`pad-unit ${isEnemyPad ? 'foe-unit' : 'ally-unit'} ${unit.isBoss ? 'boss-unit' : ''} ${unit.hp <= 0 ? 'fallen' : ''} ${roleMatch ? 'row-bonus' : ''} ${activeHeroId === unit.id || selectedEnemyId === unit.id ? 'selected' : ''} ${isValidTarget ? 'target-valid' : ''} ${actingUnitId === unit.id ? 'turn-acting' : ''} ${animatingUnitId === unit.id ? 'animating' : ''} ${vfxEvent?.targetIds.includes(unit.id) ? `vfx-target vfx-${vfxEvent.intensity} vfx-mode-${vfxEvent.targetMode}` : ''} ${vfxEvent?.actorId === unit.id ? `attacking attack-${vfxEvent.intensity} attack-mode-${vfxEvent.targetMode}` : ''}`}
+            style={{ left: `${x}%`, top: `${y}%`, zIndex, '--dash-x': `${(vfxEvent?.destination.x ?? x) - x}cqi`, '--dash-y': `${(vfxEvent?.destination.y ?? y) - y}cqb`, '--unit-accent': asset?.accent ?? '#C9A45C', '--foot-offset': `${asset?.footOffsetPx ?? 4}px`, '--sprite-scale': asset?.scale ?? 1 } as React.CSSProperties}
+            onClick={(event) => { event.stopPropagation(); onSelect(unit) }}
             title={`${unit.name} · ${unit.role} · ${unit.hp}/${unit.maxHp} HP`}
             aria-label={`Inspect ${unit.name}, ${unit.hp} of ${unit.maxHp} health`}
           >
             <span className={`pad-circle-marker circle-${row.toLowerCase()} ${roleMatch ? 'buffed' : ''}`} />
-            <span className="sprite-anchor"><UnitSprite unit={unit} compact /></span>
+            <span className="sprite-anchor"><UnitSprite unit={unit} compact facing={isEnemyPad ? 'left' : 'right'} /></span>
             <span className="pad-unit-name">{unit.name}</span>
             <span className="pad-unit-health">{unit.hp}</span>
+            {vfxEvent?.targetIds.includes(unit.id) && <BattleVfxOverlay key={`${vfxEvent.id}-${unit.id}`} attribute={vfxEvent.attribute} intensity={vfxEvent.intensity} targetMode={vfxEvent.targetMode} />}
             {floating.filter((text) => text.targetId === unit.id).map((text) => <span key={text.id} className={`float-number ${text.kind}`}>{text.text}</span>)}
           </button>
         )
@@ -243,6 +323,8 @@ function App() {
     }
   })
   const [started, setStarted] = useState(false)
+  const [selectedStarterId, setSelectedStarterId] = useState(heroes[0].id)
+  const [starterDetailsOpen, setStarterDetailsOpen] = useState(true)
   const [victory, setVictory] = useState(false)
   const [stageNumber, setStageNumber] = useState(saved?.stageNumber ?? 1)
   const [gold, setGold] = useState(saved?.gold ?? 60)
@@ -257,7 +339,9 @@ function App() {
   const [selectedSkill, setSelectedSkill] = useState<number | null>(null)
   const [modal, setModal] = useState<Modal>(null)
   const [hostagesLeft, setHostagesLeft] = useState(0)
+  const [hostageOfferIds, setHostageOfferIds] = useState<string[]>(saved?.hostageOfferIds ?? [])
   const [selectedEnemyId, setSelectedEnemyId] = useState<string | null>(null)
+  const [selectedDetailsId, setSelectedDetailsId] = useState<string | null>(null)
   const [selectedUnitForItem, setSelectedUnitForItem] = useState<string | null>(null)
   const [pendingItem, setPendingItem] = useState<ItemId | null>(null)
   const [selectedTeamSwapId, setSelectedTeamSwapId] = useState<string | null>(null)
@@ -266,7 +350,10 @@ function App() {
   const [floating, setFloating] = useState<FloatingText[]>([])
   const [cutIn, setCutIn] = useState<Unit | null>(null)
   const [impact, setImpact] = useState<string | null>(null)
+  const [vfxEvent, setVfxEvent] = useState<VfxEvent | null>(null)
+  const vfxSequence = useRef(0)
   const [animatingUnitId, setAnimatingUnitId] = useState<string | null>(null)
+  const [actingUnitId, setActingUnitId] = useState<string | null>(null)
   const [isResolving, setIsResolving] = useState(false)
   const [log, setLog] = useState('Choose Attack to take your turn.')
 
@@ -276,14 +363,23 @@ function App() {
   const activeHero = livingParty.find((unit) => unit.id === activeHeroId) ?? livingParty[0]
   const activeStage = stages[Math.min(stageNumber - 1, stages.length - 1)]
   const stage = activeStage
-  const enemyDetails = enemies.find((unit) => unit.id === selectedEnemyId)
+  const detailsUnit = roster.find((unit) => unit.id === selectedDetailsId) ??
+    enemies.find((unit) => unit.id === selectedDetailsId)
+  const detailsAreEnemy = detailsUnit ? enemies.some((unit) => unit.id === detailsUnit.id) : false
+  const ultimateChargeMax = detailsAreEnemy ? 4 : 5
+  const detailsHaveDualAttribute = detailsUnit?.attributes.some((attribute) =>
+    detailsUnit.attributes.includes(opposingAttribute[attribute]),
+  ) ?? false
+  const currentHostageOffers = (activeStage.hostageRecruitIds ?? [])
+    .map((id) => recruits.find((unit) => unit.id === id))
+    .filter((unit): unit is Unit => unit !== undefined)
 
   useEffect(() => {
     if (started && roster.length) {
-      const next = { stageNumber, gold, roster, teamIds, items, turns, enemies, hostagesLeft, enemyTurnIndex, sold }
+      const next = { stageNumber, gold, roster, teamIds, items, turns, enemies, hostagesLeft, hostageOfferIds, enemyTurnIndex, sold }
       localStorage.setItem('mythic-dungeon-save', JSON.stringify(next))
     }
-  }, [started, stageNumber, gold, roster, teamIds, items, turns, enemies, hostagesLeft, enemyTurnIndex, sold])
+  }, [started, stageNumber, gold, roster, teamIds, items, turns, enemies, hostagesLeft, hostageOfferIds, enemyTurnIndex, sold])
 
   useEffect(() => {
     if (!floating.length) return
@@ -292,8 +388,24 @@ function App() {
   }, [floating])
 
   useEffect(() => {
+    if (!attackMode && !modal) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        if (modal) {
+          if (modal !== 'hostage' && modal !== 'camp') setModal(null)
+          return
+        }
+        setAttackMode(false)
+        setSelectedSkill(null)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [attackMode, modal])
+
+  useEffect(() => {
     if (!cutIn) return
-    const timer = window.setTimeout(() => setCutIn(null), 1900)
+    const timer = window.setTimeout(() => setCutIn(null), 700)
     return () => window.clearTimeout(timer)
   }, [cutIn])
 
@@ -313,6 +425,7 @@ function App() {
     setItems(initialItems)
     setEnemies(randomEnemyGroup(stages[0]))
     setSold([])
+    setHostageOfferIds([])
     setStarted(true)
     setVictory(false)
     setActiveHeroId(starterId)
@@ -362,46 +475,87 @@ function App() {
       }
     })
 
-    const charged = chargeGauge(actor, skillIndex)
+    const actorBeforeCharge = updatedRoster.find((unit) => unit.id === actor.id) ?? actor
+    const charged = chargeGauge(actorBeforeCharge, skillIndex)
     const actorAfterCharge = { ...charged, passiveUsed: actor.passiveUsed || lyraBonus }
     const actorAfterSkill = skill.selfEffect ? addStatus(actorAfterCharge, skill.selfEffect) : actorAfterCharge
     updatedRoster = updatedRoster.map((unit) => unit.id === actor.id ? actorAfterSkill : unit)
-    setRoster(updatedRoster)
-    setEnemies(updatedEnemies)
-    addFloats(texts)
-    setTurns((value) => value + 1)
-    setImpact(skill.attribute.toLowerCase())
-    window.setTimeout(() => setImpact(null), 520)
-    setAnimatingUnitId(actor.id)
-    window.setTimeout(() => setAnimatingUnitId(null), 450)
-    setIsResolving(true)
     const dramatic = skillIndex === 3 && !actor.isMinion
+    const aoe = skill.target === 'all-enemies' || skill.target === 'all-allies'
+    const targetSide = skill.target === 'ally' || skill.target === 'all-allies' ? 'heroes' : 'enemies'
+    const destination = skill.target === 'all-enemies'
+      ? { x: 50, y: 52 }
+      : skill.target === 'all-allies'
+        ? { x: 28, y: 52 }
+        : unitBattlePosition(targets[0], targetSide === 'heroes' ? party : enemies, targetSide)
+    const vfx: VfxEvent = {
+      id: ++vfxSequence.current,
+      actorId: actor.id,
+      targetSide,
+      attribute: skill.attribute,
+      intensity: skill.type === 'heal' ? 'heal' : dramatic ? 'ultimate' : skillIndex === 2 ? 'stage2' : skillIndex === 1 ? 'stage1' : 'basic',
+      targetIds: targets.map((target) => target.id),
+      targetMode: aoe ? 'aoe' : 'single',
+      destination,
+    }
+    const prelude = dramatic ? 700 : 280
+    const hitHold = dramatic ? 580 : 420
+    const actionDuration = 380 + hitHold + 320 + 380
+    setIsResolving(true)
+    setActingUnitId(actor.id)
     if (dramatic) setCutIn(actor)
-    setMessage(`${actor.name} used ${skill.name}.`)
+    const weaknessHit = targets.some((target) =>
+      [skill.attribute, ...(skill.additionalAttributes ?? [])].some((attribute) =>
+        target.attributes.includes(opposingAttribute[attribute]) && !target.attributes.includes(attribute),
+      ),
+    )
+    setMessage(weaknessHit
+      ? `WEAKNESS! 2× DAMAGE! ${actor.name} used ${skill.name}.`
+      : `${actor.name} used ${skill.name}.`)
     setSelectedSkill(null)
     setAttackMode(false)
+    window.setTimeout(() => {
+      setAnimatingUnitId(actor.id)
+      setVfxEvent(vfx)
+      setImpact(skill.attribute.toLowerCase())
+      window.setTimeout(() => {
+        setRoster(updatedRoster)
+        setEnemies(updatedEnemies)
+        setTurns((value) => value + 1)
+        addFloats(texts)
+      }, 380)
+      window.setTimeout(() => setImpact(null), 380 + hitHold)
+      window.setTimeout(() => setVfxEvent((current) => current?.id === vfx.id ? null : current), actionDuration)
+    }, prelude)
+    window.setTimeout(() => {
+      setAnimatingUnitId(null)
+      setActingUnitId(null)
+    }, prelude + actionDuration)
     if (updatedEnemies.every((unit) => unit.hp <= 0)) {
-      window.setTimeout(() => finishBattle(updatedEnemies, updatedRoster), dramatic ? 1200 : 550)
+      window.setTimeout(() => finishBattle(updatedEnemies, updatedRoster), prelude + actionDuration)
       return
     }
     const queue = sortBySpeed(updatedRoster.filter((unit) => teamIds.includes(unit.id) && unit.hp > 0))
     const currentIndex = queue.findIndex((unit) => unit.id === actor.id)
     const nextActor = queue[(currentIndex + 1) % Math.max(queue.length, 1)]
     window.setTimeout(() => {
-      enemyTurn(updatedEnemies, updatedRoster)
-      setIsResolving(false)
-      if (nextActor) setActiveHeroId(nextActor.id)
-    }, dramatic ? 1000 : 350)
+      const enemyActionDuration = enemyTurn(updatedEnemies, updatedRoster)
+      window.setTimeout(() => {
+        setIsResolving(false)
+        if (nextActor) setActiveHeroId(nextActor.id)
+      }, enemyActionDuration)
+    }, prelude + actionDuration)
   }
 
   const enemyTurn = (currentEnemies: Unit[], currentRoster: Unit[]) => {
     const aliveEnemies = currentEnemies.filter((unit) => unit.hp > 0)
-    if (!aliveEnemies.length) return
+    if (!aliveEnemies.length) return 0
     const actingEnemy = sortBySpeed(aliveEnemies)[enemyTurnIndex % aliveEnemies.length]
     setEnemyTurnIndex((current) => current + 1)
     let partyAfter = [...currentRoster]
     let enemyAfter = [...currentEnemies]
     const texts: FloatingText[] = []
+    let actionDuration = 0
     ;[actingEnemy].forEach((enemy) => {
       const targets = teamIds.map((id) => partyAfter.find((unit) => unit.id === id)).filter((unit): unit is Unit => unit !== undefined && unit.hp > 0)
       if (!targets.length) return
@@ -445,12 +599,48 @@ function App() {
         }
         return enemySkill.selfEffect ? addStatus(acted, enemySkill.selfEffect) : acted
       })
-      if (useUltimate && enemy.isBoss) setCutIn(enemy)
-      setImpact(enemySkill.attribute.toLowerCase())
-      window.setTimeout(() => setImpact(null), 520)
-      setAnimatingUnitId(enemy.id)
-      window.setTimeout(() => setAnimatingUnitId(null), 450)
-      setLog(`${enemy.name} used ${enemySkill.name}.`)
+      const dramatic = useUltimate && !enemy.isMinion
+      const aoe = enemySkill.target === 'all-enemies' || enemySkill.target === 'all-allies'
+      const targetSide = enemySkill.target === 'all-allies' ? 'enemies' : 'heroes'
+      const destination = enemySkill.target === 'all-enemies'
+        ? { x: 50, y: 52 }
+        : enemySkill.target === 'all-allies'
+          ? { x: 72, y: 52 }
+          : unitBattlePosition(targetsForAction[0] ?? targets[0], targetSide === 'heroes' ? targets : currentEnemies, targetSide)
+      const enemyVfx: VfxEvent = {
+        id: ++vfxSequence.current,
+        actorId: enemy.id,
+        targetSide,
+        attribute: enemySkill.attribute,
+        intensity: enemySkill.type === 'heal' ? 'heal' as const : dramatic ? 'ultimate' as const : 'basic' as const,
+        targetIds: targetsForAction.map((target) => target.id),
+        targetMode: aoe ? 'aoe' as const : 'single' as const,
+        destination,
+      }
+      const prelude = dramatic ? 700 : 280
+      const hitHold = dramatic ? 580 : 420
+      actionDuration = prelude + 380 + hitHold + 320 + 380
+      setActingUnitId(enemy.id)
+      if (dramatic) setCutIn(enemy)
+      window.setTimeout(() => {
+        setAnimatingUnitId(enemy.id)
+        setVfxEvent(enemyVfx)
+        setImpact(enemySkill.attribute.toLowerCase())
+        window.setTimeout(() => {
+          setRoster(partyAfter)
+          setEnemies(enemyAfter)
+          addFloats([...texts])
+        }, 380)
+        window.setTimeout(() => setImpact(null), 380 + hitHold)
+        window.setTimeout(() => setVfxEvent((current) => current?.id === enemyVfx.id ? null : current), actionDuration - prelude)
+      }, prelude)
+      window.setTimeout(() => {
+        setAnimatingUnitId(null)
+        setActingUnitId(null)
+      }, actionDuration)
+      setLog(useUltimate
+        ? `${enemy.name} unleashes ${enemySkill.name}!`
+        : gauge[0] === 3 ? `${enemy.name} charges ${enemy.skills[3].name}!` : `${enemy.name} used ${enemySkill.name}.`)
     })
     partyAfter = partyAfter.map((unit) => {
       const ticked = tickStatuses(unit)
@@ -462,17 +652,17 @@ function App() {
       if (ticked.damage) texts.push({ id: Date.now() + Math.random(), targetId: unit.id, text: `-${ticked.damage}`, kind: 'damage' })
       return ticked.unit
     })
-    setRoster(partyAfter)
-    setEnemies(enemyAfter)
-    addFloats(texts)
     if (enemyAfter.every((unit) => unit.hp <= 0)) {
-      window.setTimeout(() => finishBattle(enemyAfter, partyAfter), 350)
-      return
+      window.setTimeout(() => finishBattle(enemyAfter, partyAfter), actionDuration)
+      return actionDuration
     }
     if (!partyAfter.some((unit) => teamIds.includes(unit.id) && unit.hp > 0)) {
       setLog('Your party is exhausted. Resting at camp to rise again.')
-      setRoster((current) => current.map((unit) => unit.hp > 0 ? unit : { ...unit, hp: Math.round(unit.maxHp * 0.3) }))
+      partyAfter = partyAfter.map((unit) => teamIds.includes(unit.id) && unit.hp <= 0
+        ? { ...unit, hp: Math.round(unit.maxHp * 0.3) }
+        : unit)
     }
+    return actionDuration
   }
 
   const finishBattle = (defeated = enemies, endingRoster = roster) => {
@@ -501,6 +691,9 @@ function App() {
     }
     if (activeStage.hostages > 0) {
       setHostagesLeft(activeStage.hostages)
+      setHostageOfferIds(activeStage.hostageRecruitIds ?? recruits
+        .filter((unit) => !afterVictory.some((hero) => hero.id === unit.id))
+        .slice(0, activeStage.hostages).map((unit) => unit.id))
       setModal('hostage')
     } else advanceStage(afterVictory)
   }
@@ -513,6 +706,7 @@ function App() {
     const nextRoster = prepareBattleRoster(currentRoster.map((unit) => ({ ...expireStageBuffs(unit), statuses: [] })), teamIds)
     setRoster(nextRoster)
     setEnemies(nextStage.kind === 'camp' ? [] : randomEnemyGroup(nextStage))
+    setHostageOfferIds([])
     setEnemyTurnIndex(0)
     setSold([])
     setActiveHeroId(firstLivingHero(nextRoster, teamIds)?.id ?? null)
@@ -524,11 +718,31 @@ function App() {
   const chooseHostage = (recruit: boolean) => {
     let updatedRoster = roster
     if (recruit) {
-      const available = recruits.find((unit) => !roster.some((hero) => hero.id === unit.id))
-      if (available) {
-        const newHero = { ...available, statuses: [], gauge: [0, 0, 0] as Unit['gauge'], row: teamIds.length < 2 ? 'Front' as const : 'Back' as const }
+      const offerIndex = activeStage.hostages - hostagesLeft
+      const available = recruits.find((unit) => unit.id === hostageOfferIds[offerIndex])
+      if (available && !roster.some((hero) => hero.id === available.id)) {
+        const preferredRow: 'Front' | 'Back' = available.role === 'Tank' || available.role === 'Assassin' ? 'Front' : 'Back'
+        const rowCounts = {
+          Front: party.filter((unit) => unit.row === 'Front').length,
+          Back: party.filter((unit) => unit.row === 'Back').length,
+        }
+        const row = teamIds.length < 5
+          ? ([preferredRow, preferredRow === 'Front' ? 'Back' : 'Front'] as const)
+            .find((candidate) => rowCounts[candidate] < (candidate === 'Front' ? 2 : 3))
+          : preferredRow
+        const newHero = {
+          ...available,
+          statuses: [],
+          gauge: [0, 0, 0] as Unit['gauge'],
+          row: row ?? preferredRow,
+        }
         updatedRoster = [...roster, newHero]
         setRoster(updatedRoster)
+        if (teamIds.length < 5) {
+          const nextTeamIds = [...new Set([...teamIds, available.id])]
+          setTeamIds(nextTeamIds)
+          if (!activeHeroId || !livingParty.some((unit) => unit.id === activeHeroId)) setActiveHeroId(available.id)
+        }
         setMessage(`${available.name} joined your roster.`)
       } else setGold((current) => current + 60)
     } else setGold((current) => current + 60)
@@ -587,49 +801,86 @@ function App() {
   }
 
   const chooseTeamMember = (unit: Unit) => {
-    if (teamIds.includes(unit.id)) {
-      if (selectedTeamSwapId && !teamIds.includes(selectedTeamSwapId)) {
-        setTeamIds((current) => current.map((id) => id === unit.id ? selectedTeamSwapId : id))
-        updateRoster(selectedTeamSwapId, (hero) => ({ ...hero, row: unit.row ?? 'Back' }))
-        setSelectedTeamSwapId(null)
-        return
+    setSelectedTeamSwapId((selected) => selected === unit.id ? null : unit.id)
+  }
+
+  const chooseFormationSlot = (row: 'Front' | 'Back', targetId?: string) => {
+    const source = roster.find((unit) => unit.id === selectedTeamSwapId)
+    if (!source) return
+    const sourceInTeam = teamIds.includes(source.id)
+    const target = targetId ? roster.find((unit) => unit.id === targetId) : undefined
+    if (targetId && !target) return
+
+    if (!sourceInTeam) {
+      if (target) {
+        setTeamIds((current) => current.map((id) => id === target.id ? source.id : id))
+        updateRoster(source.id, (hero) => ({ ...hero, row }))
+        if (activeHeroId === target.id) setActiveHeroId(source.id)
+      } else if (teamIds.length < 5) {
+        setTeamIds((current) => current.includes(source.id) ? current : [...current, source.id])
+        updateRoster(source.id, (hero) => ({ ...hero, row }))
+        if (!activeHeroId || !party.some((hero) => hero.id === activeHeroId && hero.hp > 0)) setActiveHeroId(source.id)
       }
-      const targetRow = unit.row === 'Front' ? 'Back' : 'Front'
-      const targetCapacity = targetRow === 'Front' ? 2 : 3
-      const targetCount = party.filter((member) => member.row === targetRow).length
-      if (targetCount >= targetCapacity) {
-        setMessage(`${targetRow} row is full. Move a hero out first.`)
-        return
-      }
-      updateRoster(unit.id, (hero) => ({ ...hero, row: targetRow }))
-      return
-    }
-    if (teamIds.length < 5) {
-      setTeamIds((current) => [...current, unit.id])
-      updateRoster(unit.id, (hero) => ({ ...hero, row: teamIds.filter((id) => roster.find((member) => member.id === id)?.row === 'Front').length < 2 ? 'Front' : 'Back' }))
       setSelectedTeamSwapId(null)
       return
     }
-    setSelectedTeamSwapId(unit.id)
+
+    if (target && target.id !== source.id) {
+      setTeamIds((current) => current.map((id) => id === source.id ? target.id : id === target.id ? source.id : id))
+      updateRoster(source.id, (hero) => ({ ...hero, row: target.row ?? row }))
+      updateRoster(target.id, (hero) => ({ ...hero, row }))
+      if (activeHeroId === source.id) setActiveHeroId(target.id)
+      else if (activeHeroId === target.id) setActiveHeroId(source.id)
+      setSelectedTeamSwapId(null)
+      return
+    }
+
+    const targetCapacity = row === 'Front' ? 2 : 3
+    const targetCount = party.filter((unit) => unit.id !== source.id && unit.row === row).length
+    if ((source.row ?? 'Back') !== row && targetCount >= targetCapacity) {
+      setMessage(`${row} row is full. Move a hero out first.`)
+      return
+    }
+    updateRoster(source.id, (hero) => ({ ...hero, row }))
+    setSelectedTeamSwapId(null)
   }
 
-  const dropTeamMember = (target: Unit, sourceId: string) => {
-    if (!teamIds.includes(target.id) || teamIds.includes(sourceId)) return
-    const source = roster.find((unit) => unit.id === sourceId)
-    if (!source) return
-    if (teamIds.length < 5) {
-      const frontCount = teamIds.filter((id) => roster.find((unit) => unit.id === id)?.row === 'Front').length
-      setTeamIds((current) => [...current, source.id])
-      updateRoster(source.id, (unit) => ({ ...unit, row: frontCount < 2 ? 'Front' : 'Back' }))
-    } else {
-      setTeamIds((current) => current.map((id) => id === target.id ? source.id : id))
-      updateRoster(source.id, (unit) => ({ ...unit, row: target.row ?? 'Back' }))
+  const moveToBench = (unit: Unit) => {
+    if (teamIds.length <= 1) return
+    setTeamIds((current) => current.filter((id) => id !== unit.id))
+    if (activeHeroId === unit.id) setActiveHeroId(firstLivingHero(roster, teamIds.filter((id) => id !== unit.id))?.id ?? null)
+    setSelectedTeamSwapId(null)
+  }
+
+  const swapInBench = (unit: Unit) => {
+    if (teamIds.length >= 5) {
+      setSelectedTeamSwapId(unit.id)
+      return
     }
+    const preferredRow: 'Front' | 'Back' = unit.role === 'Tank' || unit.role === 'Assassin' ? 'Front' : 'Back'
+    const rowCounts = {
+      Front: party.filter((member) => member.row === 'Front').length,
+      Back: party.filter((member) => member.row === 'Back').length,
+    }
+    const candidateRows: Array<'Front' | 'Back'> = [preferredRow, preferredRow === 'Front' ? 'Back' : 'Front']
+    const row = candidateRows
+      .find((candidate) => rowCounts[candidate] < (candidate === 'Front' ? 2 : 3))
+    if (!row) {
+      setMessage('Your formation is full. Select a hero to swap out first.')
+      return
+    }
+    setTeamIds((current) => [...current, unit.id])
+    updateRoster(unit.id, (hero) => ({ ...hero, row }))
     setSelectedTeamSwapId(null)
   }
 
   const selectSkill = (index: number) => {
     if (!activeHero) return
+    if (selectedSkill === index) {
+      setSelectedSkill(null)
+      setMessage('Skill unselected. Choose another action.')
+      return
+    }
     const skill = activeHero.skills[index]
     if (index > 0 && activeHero.gauge[index - 1] < skill.cost) {
       setMessage(`${skill.name} is charging (${activeHero.gauge[index - 1]}/${skill.cost}).`)
@@ -647,12 +898,12 @@ function App() {
 
   const chooseTarget = (unit: Unit) => {
     if (modal === 'details') {
-      setSelectedEnemyId(unit.id)
+      setSelectedDetailsId(unit.id)
       return
     }
     if (selectedSkill === null || !activeHero) {
-      if (enemies.some((enemy) => enemy.id === unit.id)) {
-        setSelectedEnemyId(unit.id)
+      if (enemies.some((enemy) => enemy.id === unit.id) || party.some((hero) => hero.id === unit.id)) {
+        setSelectedDetailsId(unit.id)
         setModal('details')
       }
       return
@@ -680,6 +931,8 @@ function App() {
     setSold(saved.sold ?? [])
     setActiveHeroId(firstLivingHero(saved.roster, saved.teamIds)?.id ?? null)
     const resumeStage = stages[saved.stageNumber - 1]
+    setHostageOfferIds(saved.hostageOfferIds ?? recruits.filter((unit) => !saved.roster.some((hero) => hero.id === unit.id))
+      .slice(0, resumeStage?.hostages ?? 0).map((unit) => unit.id))
     if ((saved.hostagesLeft ?? 0) > 0) {
       setEnemies(saved.enemies ?? [])
       setModal('hostage')
@@ -687,6 +940,18 @@ function App() {
       setEnemies([])
       setModal('camp')
     } else if (resumeStage) setEnemies(saved.enemies?.length ? saved.enemies : randomEnemyGroup(resumeStage))
+  }
+
+  const restartRun = () => {
+    localStorage.removeItem('mythic-dungeon-save')
+    setSaved(null)
+    beginRun(selectedStarterId)
+  }
+
+  const openTeamModal = () => {
+    setTeamTab('squad')
+    setSelectedTeamSwapId(null)
+    setModal('team')
   }
 
   if (!started && !victory) {
@@ -699,32 +964,50 @@ function App() {
           <h1>DESCEND INTO<br /><em>LEGEND</em></h1>
           <p className="title-copy">Choose your first champion. Gather companions.<br />Break the eclipse and claim a birthday legend.</p>
           <div className="starter-label"><span>01</span> CHOOSE YOUR FIRST COMPANION</div>
-          <div className="starter-grid">
-            {heroes.map((hero) => {
+          <div className={`starter-layout ${starterDetailsOpen ? 'details-open' : ''}`}>
+            <div className="starter-grid">
+              {heroes.map((hero) => {
+                return (
+                  <button type="button" aria-pressed={selectedStarterId === hero.id} className={`starter-card ${selectedStarterId === hero.id ? 'selected' : ''}`} key={hero.id} onClick={() => { setSelectedStarterId(hero.id); setStarterDetailsOpen(true) }}>
+                    <span className="starter-portrait"><Avatar unit={hero} /><span>{hero.attributes[0]}</span></span>
+                    <span className="starter-meta">
+                      <span className="starter-role">{hero.role} <b>·</b> {hero.attributes[0]}</span>
+                      <strong>{hero.name}</strong>
+                      <small className="starter-passive"><b>PASSIVE</b> {hero.ability}</small>
+                      <span className="starter-skill-list">{hero.skills.map((skill, index) => (
+                        <small key={skill.name}><i>{index === 0 ? 'BASIC' : index === 3 ? 'ULT' : `S${index}`}</i>{skill.name}<b>{skill.power}%</b></small>
+                      ))}</span>
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+            {starterDetailsOpen && (() => {
+              const hero = heroes.find((unit) => unit.id === selectedStarterId) ?? heroes[0]
               const rowBonus = {
-                Tank: 'FRONT · +25% DEF',
-                Assassin: 'FRONT · +20% PHY ATK',
-                Attacker: 'BACK · +20% PHY ATK',
-                Mage: 'BACK · +20% MAG ATK',
-                Healer: 'BACK · +25% HEAL',
+                Tank: 'Front · +25% DEF',
+                Assassin: 'Front · +20% Phys ATK',
+                Attacker: 'Back · +20% Phys ATK',
+                Mage: 'Back · +20% Mag ATK',
+                Healer: 'Back · +25% Healing',
               }[hero.role]
-              return (
-              <button className="starter-card" key={hero.id} onClick={() => beginRun(hero.id)}>
-                <span className="starter-portrait"><Avatar unit={hero} /><span>{hero.attributes[0]}</span></span>
-                <span className="starter-meta">
-                  <span className="starter-role">{hero.role} <b>·</b> {hero.attributes[0]}</span>
-                  <strong>{hero.name}</strong>
-                  <small className="starter-passive"><b>PASSIVE</b> {hero.ability}</small>
-                  <span className="starter-skill-list">{hero.skills.map((skill, index) => (
-                    <small key={skill.name}><i>{index === 0 ? 'BASIC' : index === 3 ? 'ULT' : `S${index}`}</i>{skill.name}<b>{skill.power}%</b></small>
-                  ))}</span>
-                </span>
-                <span className="starter-bonus">{rowBonus}<ChevronRight className="starter-arrow" size={16} /></span>
-              </button>
-              )
-            })}
+              return <aside className="starter-detail-panel">
+                <div className="starter-detail-heading"><span>CHAMPION DOSSIER</span></div>
+                <div className="starter-detail-identity"><Avatar unit={hero} /><div><AttributeBadge attributes={hero.attributes} /><h2>{hero.name}</h2><span>{hero.role} · {rowBonus}</span></div></div>
+                <div className="starter-detail-stats"><span>HP <b>{hero.maxHp}</b></span><span>Phys ATK <b>{hero.physAtk}</b></span><span>Mag ATK <b>{hero.magAtk}</b></span><span>DEF <b>{hero.def}</b></span><span>SPD <b>{hero.spd}</b></span></div>
+                <p className="starter-detail-passive"><b>PASSIVE</b>{hero.ability}</p>
+                <div className="starter-detail-skills">{hero.skills.map((skill, index) => <article key={skill.name}>
+                  <div><b>{skill.name}</b><span>{index === 0 ? 'BASIC · FREE' : `${index === 3 ? 'ULTIMATE' : `STAGE ${index}`} · ${skill.cost} GAUGE`}</span></div>
+                  <p>{skill.description}</p>
+                </article>)}</div>
+              </aside>
+            })()}
           </div>
-          {saved && <button className="resume-button" onClick={resumeSavedRun}>Continue your journey <ChevronRight size={15} /></button>}
+          <div className="start-actions">
+            {saved
+              ? <div className="saved-run-actions"><button className="begin-descent-button" onClick={resumeSavedRun}>Continue Descent <ChevronRight size={20} /></button><button className="restart-descent-button" onClick={restartRun}>Restart</button></div>
+              : <button className="begin-descent-button" onClick={() => beginRun(selectedStarterId)}>Begin Descent <ChevronRight size={20} /></button>}
+          </div>
         </section>
         <footer className="title-footer"><span>SIX DUNGEON AREAS · FIFTEEN STAGES · ONE UNFORGETTABLE DAY</span><span>✦ A tale made just for you ✦</span></footer>
       </main>
@@ -767,8 +1050,10 @@ function App() {
           ))}</div>
         </section>
         <div className="top-tools"><div className="gold-counter"><Coins size={16} /><b>{gold}</b><small>GOLD</small></div>
-          <button className="wheel-button" aria-label="Attribute wheel: Light and Shadow, Ice and Fire, Sound and Earth deal double damage when opposed; dual attributes cancel this weakness." title="Opposing attributes deal 2× damage. If a defender holds both attributes in a pair, the weakness cancels to 1×." onClick={() => setMessage('Light ↔ Shadow, Ice ↔ Fire, and Sound ↔ Earth deal 2× damage. Dual opposing attributes cancel to 1×.')}>
-            <span className="wheel-icon">✦</span><span className="wheel-copy">LIGHT ↔ SHADOW<br />ICE ↔ FIRE · SOUND ↔ EARTH</span>
+          <button className="wheel-button" aria-label="Open attribute chart" title="Open the attribute chart" onClick={() => setModal('chart')}>
+            <span className="attribute-wheel-mini"><i className="attr-light">L</i><b>↔</b><i className="attr-shadow">S</i></span>
+            <span className="attribute-wheel-mini"><i className="attr-ice">I</i><b>↔</b><i className="attr-fire">F</i></span>
+            <span className="attribute-wheel-mini"><i className="attr-sound">♫</i><b>↔</b><i className="attr-earth">E</i></span>
           </button>
         </div>
       </header>
@@ -780,26 +1065,30 @@ function App() {
             {sortBySpeed(party).map((unit) => {
               const order = turnOrder.findIndex((candidate) => candidate.id === unit.id) + 1
               const bonus = formationBonus(unit)
-              return <button key={unit.id} className={`unit-card hero-unit ${activeHero?.id === unit.id ? 'active' : ''} ${unit.hp <= 0 ? 'fallen' : ''}`} onClick={() => unit.hp > 0 && setActiveHeroId(unit.id)}>
+              return <button key={unit.id} className={`unit-card hero-unit ${activeHero?.id === unit.id ? 'active' : ''} ${actingUnitId === unit.id ? 'turn-acting' : ''} ${unit.hp <= 0 ? 'fallen' : ''}`} onClick={() => { setSelectedDetailsId(unit.id); setModal('details') }}>
                 <div className="unit-card-top"><span className="turn-badge">{order ? `${order}${order === 1 ? 'st' : order === 2 ? 'nd' : order === 3 ? 'rd' : 'th'}` : '—'}</span><Avatar unit={unit} compact /><div className="unit-name-wrap"><b>{unit.name}</b><span>{unit.role} · {unit.row ?? 'Back'}</span></div><span className="unit-hp-value">{unit.hp}/{unit.maxHp}</span></div>
                 <div className="unit-attributes"><AttributeBadge attributes={unit.attributes} /><span>PHY {unit.physAtk} · MAG {unit.magAtk} · SPD {unit.spd}{bonus.phys || bonus.mag ? ' · ROW ATK' : bonus.def ? ' · ROW DEF' : bonus.heal ? ' · ROW HEAL' : ''}</span></div>
                 <HealthBar unit={unit} /><StatusMarks unit={unit} />
               </button>
             })}
           </div>
-          <button className="sidebar-link" onClick={() => setModal('team')}><UsersRound size={14} /> Edit formation <ChevronRight size={13} /></button>
+          <button className="sidebar-link" onClick={openTeamModal}><UsersRound size={14} /> Edit formation <ChevronRight size={13} /></button>
+          <div className="turn-status" role="status"><span>TURN STATUS</span><b>{isResolving ? 'Enemy action resolving' : activeHero ? `${activeHero.name} · Your turn` : 'No active hero'}</b></div>
         </aside>
 
-        <section className={`arena ${attackMode ? 'attack-open' : ''} ${impact ? 'impact' : ''}`} data-impact={impact ?? undefined} data-area={stage.areaId}>
+        <section className={`arena ${attackMode ? 'attack-open' : ''} ${impact ? 'impact' : ''} ${vfxEvent?.targetMode === 'aoe' ? 'impact-aoe' : vfxEvent ? 'impact-single' : ''} ${vfxEvent?.targetSide === 'heroes' ? 'impact-targets-heroes' : ''} ${vfxEvent?.intensity ? `impact-${vfxEvent.intensity}` : ''}`} data-impact={impact ?? undefined} data-area={stage.areaId} onClick={(event) => {
+          if ((event.target as HTMLElement).closest('.pad-unit') || selectedSkill === null || !activeHero) return
+          const skill = activeHero.skills[selectedSkill]
+          if (skill.target === 'all-enemies' || skill.target === 'all-allies') executePlayerSkill(selectedSkill)
+        }}>
           <div className="arena-topline"><span><i /> {stage.areaName}</span><b>STAGE {String(stage.number).padStart(2, '0')} <small>/ 15</small></b></div>
+          <div className="battle-callout" role="status" aria-live="polite">{log}</div>
           <div className="arena-location"><span>✦</span><h2>{stage.title}</h2><p>{stage.description}</p></div>
           <div className="battle-pads">
-            <FormationPad side="heroes" units={party} activeHeroId={activeHero?.id ?? null} selectedEnemyId={selectedEnemyId} targetType={selectedSkill === null ? null : activeHero?.skills[selectedSkill].target ?? null} floating={floating} animatingUnitId={animatingUnitId} onSelect={chooseTarget} />
+            <FormationPad side="heroes" units={party} activeHeroId={activeHero?.id ?? null} selectedEnemyId={selectedEnemyId} targetType={selectedSkill === null ? null : activeHero?.skills[selectedSkill].target ?? null} actingUnitId={actingUnitId} floating={floating} animatingUnitId={animatingUnitId} vfxEvent={vfxEvent} onSelect={chooseTarget} />
             <div className="battle-divider"><span>VS</span></div>
-            <FormationPad side="enemies" units={enemies} activeHeroId={activeHero?.id ?? null} selectedEnemyId={selectedEnemyId} targetType={selectedSkill === null ? null : activeHero?.skills[selectedSkill].target ?? null} floating={floating} animatingUnitId={animatingUnitId} onSelect={chooseTarget} />
-            {stage.kind === 'fight' && <div className="hostage-cage" title={`${stage.hostages} hostages await rescue`}><span className="cage-mark">✦</span><span className="cage-bars">╫╫╫</span><span className="cage-captives">{recruits.filter((unit) => !roster.some((hero) => hero.id === unit.id)).slice(0, stage.hostages).map((unit) => <Avatar key={unit.id} unit={unit} compact />)}</span><b>{stage.hostages}</b><small>HOSTAGE CAGE</small></div>}
+            <FormationPad side="enemies" units={enemies} activeHeroId={activeHero?.id ?? null} selectedEnemyId={selectedEnemyId} targetType={selectedSkill === null ? null : activeHero?.skills[selectedSkill].target ?? null} actingUnitId={actingUnitId} floating={floating} animatingUnitId={animatingUnitId} vfxEvent={vfxEvent} onSelect={chooseTarget} />
           </div>
-          <div className="battle-log"><span>✦</span>{log}</div>
           {attackMode && <div className="combat-illustration"><Avatar unit={activeHero ?? heroes[0]} combat /><span>{activeHero?.name}</span></div>}
           {attackMode && <div className="skill-deck">
             {activeHero?.skills.map((skill, index) => {
@@ -810,7 +1099,7 @@ function App() {
               return <button className={`skill-card ${ready ? 'ready' : 'charging'} ${selectedSkill === index ? 'chosen' : ''} ${index === 3 ? 'ultimate-card' : ''}`} key={skill.name} onClick={() => selectSkill(index)} title={skill.description}>
                 <span className="skill-topline"><span className="skill-level">{index === 0 ? 'BASIC' : index === 3 ? 'ULTIMATE' : `STAGE ${index}`}</span><span className="skill-attribute"><i>{({ Light: '✦', Shadow: '◈', Ice: '❄', Fire: '♨', Sound: '♫', Earth: '⬟' })[skill.attribute]}</i>{skillAttributes} · {targetLabel}</span></span>
                 <b>{skill.name}</b>
-                <span className="skill-scale"><i>{skill.type.toUpperCase()} · {skill.power}%</i><strong>{index === 0 ? 'FREE' : `${gauge}/${skill.cost}`}</strong></span>
+                <span className="skill-scale"><i>{skill.type.toUpperCase()} · {skill.power}%</i><strong>{index === 0 ? 'READY' : `${gauge}/${skill.cost}`}</strong></span>
                 <small>{skill.description}</small>
                 <span className="gauge-pips" aria-label={index === 0 ? 'Basic skill, no charge required' : `${gauge} of ${skill.cost} charges`}>
                   {Array.from({ length: Math.max(skill.cost, 1) }, (_, pip) => <i key={pip} className={index === 0 || pip < gauge ? 'filled' : ''} />)}
@@ -820,7 +1109,7 @@ function App() {
           </div>}
           <div className="bottom-actions">
             {attackMode ? <><button onClick={() => setModal('items')}><Backpack size={15} /> Items</button><button onClick={() => setModal('shop')}><ShoppingBag size={15} /> Shop</button><button className="back-action" onClick={() => { setAttackMode(false); setSelectedSkill(null) }}><ArrowLeft size={15} /> Back</button></>
-              : <><button className="primary-action" disabled={isResolving || !livingParty.length} onClick={() => { setAttackMode(true); setSelectedSkill(null); setMessage(`${activeHero?.name ?? 'Your hero'} is ready. Choose a skill.`) }}><Swords size={16} /> {isResolving ? 'Resolving…' : 'Attack'}</button><button onClick={() => setModal('items')}><Backpack size={15} /> Items</button><button onClick={() => setModal('shop')}><ShoppingBag size={15} /> Shop</button><button onClick={() => setModal('team')}><UsersRound size={15} /> Team</button></>}
+              : <><button className="primary-action" disabled={isResolving || !livingParty.length} onClick={() => { setAttackMode(true); setSelectedSkill(null) }}><Swords size={16} /> {isResolving ? 'Resolving…' : 'Attack'}</button><button onClick={() => setModal('items')}><Backpack size={15} /> Items</button><button onClick={() => setModal('shop')}><ShoppingBag size={15} /> Shop</button><button onClick={openTeamModal}><UsersRound size={15} /> Team</button></>}
           </div>
         </section>
 
@@ -829,7 +1118,7 @@ function App() {
           <div className="unit-list">
             {sortBySpeed(enemies).map((unit) => {
               const order = turnOrder.findIndex((candidate) => candidate.id === unit.id) + 1
-              return <button key={unit.id} className={`unit-card enemy-unit ${unit.hp <= 0 ? 'fallen' : ''}`} onClick={() => { setSelectedEnemyId(unit.id); setModal('details') }}>
+              return <button key={unit.id} className={`unit-card enemy-unit ${actingUnitId === unit.id ? 'turn-acting' : ''} ${unit.hp <= 0 ? 'fallen' : ''}`} onClick={() => { setSelectedEnemyId(unit.id); setSelectedDetailsId(unit.id); setModal('details') }}>
                 <div className="unit-card-top"><span className="turn-badge">{order ? `${order}${order === 1 ? 'st' : order === 2 ? 'nd' : order === 3 ? 'rd' : 'th'}` : '—'}</span><Avatar unit={unit} compact /><div className="unit-name-wrap"><b>{unit.name}</b><span>{unit.isBoss ? 'DUNGEON BOSS' : unit.role}</span></div><span className="unit-hp-value">{unit.hp}/{unit.maxHp}</span></div>
                 <div className="unit-attributes"><AttributeBadge attributes={unit.attributes} /><span>PHY {unit.physAtk} · MAG {unit.magAtk} · SPD {unit.spd}</span></div>
                 <HealthBar unit={unit} /><StatusMarks unit={unit} />
@@ -837,27 +1126,121 @@ function App() {
             })}
           </div>
           <div className="enemy-inspect-hint"><Sparkles size={13} /> Select an enemy to inspect</div>
+          {stage.kind === 'fight' && stage.hostages > 0 && <button className="hostage-cage" onClick={() => setModal('hostage-details')} title={`${stage.hostages} hostages await rescue`}>
+            <span className="cage-mark">✦</span><span className="cage-bars">╫╫╫</span>
+            <span className="cage-captives">{currentHostageOffers.slice(0, stage.hostages).map((unit) => <Avatar key={unit.id} unit={unit} compact />)}</span>
+            <b>{stage.hostages}</b><small>HOSTAGE CAGE · INSPECT</small>
+          </button>}
         </aside>
       </div>
 
       {modal && <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && modal !== 'hostage' && modal !== 'camp') setModal(null) }}>
-        <section className={`dialog ${modal === 'details' ? 'details-dialog' : ''} ${modal === 'camp' ? 'camp-dialog' : ''}`} role="dialog" aria-modal="true">
-          <button className="dialog-close" onClick={() => modal !== 'hostage' && modal !== 'camp' && setModal(null)} aria-label="Close"><X size={18} /></button>
-          {modal === 'details' && enemyDetails && <><div className="dialog-kicker">ENEMY INTELLIGENCE</div><div className="detail-hero"><Avatar unit={enemyDetails} /><div><AttributeBadge attributes={enemyDetails.attributes} /><h2>{enemyDetails.name}</h2><span>{enemyDetails.isBoss ? 'DUNGEON BOSS' : enemyDetails.role}</span></div></div><p className="dialog-description"><b>PASSIVE · </b>{enemyDetails.ability}</p><div className="detail-stats"><span><Heart size={14} /> HP <b>{enemyDetails.hp}/{enemyDetails.maxHp}</b></span><span><Swords size={14} /> PHY ATK <b>{enemyDetails.physAtk}</b></span><span><Sparkles size={14} /> MAG ATK <b>{enemyDetails.magAtk}</b></span><span><Shield size={14} /> DEF <b>{enemyDetails.def}</b></span><span><ChevronRight size={14} /> SPD <b>{enemyDetails.spd}</b></span></div>
-            {enemyDetails.attributes.some((attribute) => [['Light', 'Shadow'], ['Ice', 'Fire'], ['Sound', 'Earth']].some((pair) => pair.includes(attribute) && pair.every((item) => enemyDetails.attributes.includes(item as Unit['attributes'][number])))) && <p className="dual-cancel-note">DUAL ATTRIBUTE · opposing weakness cancels to 1× damage.</p>}
-            <div className="enemy-skill-details"><div><b>BASIC · {enemyDetails.skills[0].name}</b><small>{enemyDetails.skills[0].description}</small></div><div><b>ULTIMATE · {enemyDetails.skills[3].name}</b><small>{enemyDetails.skills[3].description}</small></div></div>
-            <div className="enemy-ult"><span>ULTIMATE CHARGE</span><div className="gauge-track"><i style={{ width: `${Math.min(100, enemyDetails.gauge[0] / 4 * 100)}%` }} /></div><b>{enemyDetails.gauge[0]}/4</b></div><button className="gold-button" onClick={() => setModal(null)}>Understood</button></>}
+        <section className={`dialog ${modal === 'details' ? 'details-dialog' : ''} ${modal === 'hostage-details' ? 'hostage-details-dialog' : ''} ${modal === 'chart' ? 'chart-dialog' : ''} ${modal === 'camp' ? 'camp-dialog' : ''} ${modal === 'team' ? 'team-dialog' : ''}`} role="dialog" aria-modal="true">
+          {modal !== 'hostage' && modal !== 'camp' && <button className="dialog-close" onClick={() => setModal(null)} aria-label="Close"><X size={18} /></button>}
+          {modal === 'details' && detailsUnit && <>
+            <div className="dialog-kicker">{detailsUnit.isBoss ? 'BOSS INTELLIGENCE' : party.some((unit) => unit.id === detailsUnit.id) ? 'COMPANION PROFILE' : 'ENEMY INTELLIGENCE'}</div>
+            <div className="detail-hero"><Avatar unit={detailsUnit} facing={enemies.some((unit) => unit.id === detailsUnit.id) ? 'left' : 'right'} /><div><AttributeBadge attributes={detailsUnit.attributes} /><h2>{detailsUnit.name}</h2><span>{detailsUnit.role}{detailsUnit.isBoss ? ' · DUNGEON BOSS' : ''}</span></div></div>
+            <div className="detail-stats"><span><Heart size={14} /> HP <b>{detailsUnit.hp}/{detailsUnit.maxHp}</b></span><span><Swords size={14} /> Phys ATK <b>{detailsUnit.physAtk}</b></span><span><Sparkles size={14} /> Mag ATK <b>{detailsUnit.magAtk}</b></span><span><Shield size={14} /> DEF <b>{detailsUnit.def}</b></span><span><ChevronRight size={14} /> SPD <b>{detailsUnit.spd}</b></span></div>
+            <p className="dialog-description"><b>ATTRIBUTE · </b>{detailsUnit.attributes.join(' / ')}</p>
+            {detailsHaveDualAttribute && <p className="dual-cancel-note">DUAL ATTRIBUTE · matching opposing attacks are neutralized to 1.0× damage.</p>}
+            <p className="dialog-description"><b>PASSIVE · </b>{detailsUnit.ability}</p>
+            <div className="detail-statuses"><b>ACTIVE STATUS</b>{detailsUnit.statuses.length
+              ? detailsUnit.statuses.map((status) => <span key={status.kind}>{status.kind} · {status.turns}t</span>)
+              : <span>None</span>}</div>
+            <div className="enemy-skill-details">{detailsUnit.skills.map((skill, index) => {
+              const charge = index === 0 ? 0 : detailsAreEnemy
+                ? index === 3 ? detailsUnit.gauge[0] : 0
+                : detailsUnit.gauge[index - 1]
+              return <div key={skill.name}>
+                <b>{index === 0 ? 'BASIC' : index === 3 ? 'ULTIMATE' : `STAGE ${index}`} · {skill.name} · {index === 0 ? 'FREE' : `${charge}/${index === 3 && detailsAreEnemy ? ultimateChargeMax : skill.cost} GAUGE`}</b>
+                <small>{skill.description}</small>
+              </div>
+            })}</div>
+            <div className="enemy-ult"><span>ULTIMATE CHARGE</span><div className="gauge-track"><i style={{ width: `${Math.min(100, detailsUnit.gauge[0] / ultimateChargeMax * 100)}%` }} /></div><b>{detailsUnit.gauge[0]}/{ultimateChargeMax}</b></div>
+          </>}
+          {modal === 'chart' && <>
+            <div className="dialog-kicker">ELEMENTAL MATCHUPS</div><h2>Attribute Chart</h2>
+            <div className="attribute-chart">{[
+              ['Light', 'Shadow'], ['Ice', 'Fire'], ['Sound', 'Earth'],
+            ].map(([first, second]) => <div className="attribute-chart-row" key={first}>
+              <span className={`attribute-emblem attr-${first.toLowerCase()}`}>{first === 'Light' ? '✦' : first === 'Ice' ? '❄' : '♫'}<b>{first}</b></span>
+              <i>↔</i><b className="chart-multiplier">2×</b><i>↔</i>
+              <span className={`attribute-emblem attr-${second.toLowerCase()}`}>{second === 'Shadow' ? '◈' : second === 'Fire' ? '♨' : '⬟'}<b>{second}</b></span>
+            </div>)}</div>
+            <p className="dual-cancel-note">Dual-attribute bosses with both opposing elements take 1.0× normal damage instead.</p>
+          </>}
+          {modal === 'hostage-details' && <>
+            <div className="dialog-kicker">HOSTAGE CAGE · STAGE {stage.number}</div><h2>Captives awaiting rescue</h2>
+            <p className="dialog-description">On victory, each captive can join your roster or be exchanged for 60 Gold.</p>
+            <div className="cage-hostage-list">{currentHostageOffers.slice(0, stage.hostages).map((unit) => <article key={unit.id}>
+              <Avatar unit={unit} /><div><b>{unit.name}</b><span>{unit.role} · {unit.attributes.join(' / ')}</span><small>Passive · {unit.ability}</small><small>Reward · Recruit or 60 Gold</small></div>
+            </article>)}</div>
+          </>}
           {modal === 'camp' && <><div className="campfire-scene"><DungeonBackdrop key="campfire-rest" areaId="campfire-rest" /><span>♨</span></div><div className="dialog-kicker">A MOMENT OF RESPITE · STAGE {stage.number}</div><h2>{stage.title}</h2><p className="dialog-description">The road is quiet. Choose how your party spends this pause.</p><div className="camp-choices"><button onClick={() => chooseCamp('rest')}><Heart size={19} /><b>Rest at Campfire</b><span>Heal the whole party by 50% and revive fallen heroes.</span></button><button onClick={() => chooseCamp('scavenge')}><Coins size={19} /><b>Claim Hidden Cache</b><span>Find 100 gold for your journey.</span></button></div></>}
-          {modal === 'hostage' && <><div className="dialog-icon"><Sparkles size={24} /></div><div className="dialog-kicker">A CAGE UNLOCKED</div><h2>A new companion awaits.</h2><p className="dialog-description">Freed companion {activeStage.hostages - hostagesLeft + 1} of {activeStage.hostages}. Choose a place in your roster or accept 60 gold.</p>{(() => { const rescued = recruits.find((unit) => !roster.some((hero) => hero.id === unit.id)); return rescued ? <div className="hostage-recruit"><Avatar unit={rescued} /><div><b>{rescued.name}</b><span>{rescued.role} · {rescued.attributes.join(' / ')}</span><small>Passive: {rescued.ability}</small><small>{rescued.skills.map((skill) => skill.name).join(' · ')}</small></div></div> : <div className="hostage-recruit"><Avatar unit={heroes[0]} /><div><b>Your roster is complete</b><span>Accept gold to continue the descent.</span></div></div> })()}<div className="dialog-actions"><button className="gold-button" onClick={() => chooseHostage(true)}><Plus size={15} /> Recruit to Roster</button><button className="outline-button" onClick={() => chooseHostage(false)}><Coins size={15} /> Accept 60 Gold</button></div></>}
+          {modal === 'hostage' && <><div className="dialog-icon"><Sparkles size={24} /></div><div className="dialog-kicker">A CAGE UNLOCKED</div><h2>A new companion awaits.</h2><p className="dialog-description">Freed companion {activeStage.hostages - hostagesLeft + 1} of {activeStage.hostages}. Choose a place in your roster or accept 60 gold.</p>{(() => { const offerIndex = activeStage.hostages - hostagesLeft; const rescued = recruits.find((unit) => unit.id === hostageOfferIds[offerIndex]) ?? recruits.find((unit) => !roster.some((hero) => hero.id === unit.id)); return rescued ? <div className="hostage-recruit"><Avatar unit={rescued} /><div><b>{rescued.name}</b><span>{rescued.role} · {rescued.attributes.join(' / ')}</span><small>Passive: {rescued.ability}</small><small>{rescued.skills.map((skill) => skill.name).join(' · ')}</small></div></div> : <div className="hostage-recruit"><Avatar unit={heroes[0]} /><div><b>Your roster is complete</b><span>Accept gold to continue the descent.</span></div></div> })()}<div className="dialog-actions"><button className="gold-button" onClick={() => chooseHostage(true)}><Plus size={15} /> Recruit to Roster</button><button className="outline-button" onClick={() => chooseHostage(false)}><Coins size={15} /> Accept 60 Gold</button></div></>}
           {modal === 'shop' && <><div className="dialog-kicker">THE WAYFARER’S STALL · STAGE {stageNumber}</div><h2>Useful things, fair prices.</h2><p className="dialog-description">Stock refreshes at every stage. Supplies last until used.</p><div className="shop-list">{shopItems.map((item) => <div className="shop-row" key={item.id}><span className="shop-item-icon"><Sparkles size={16} /></span><div><b>{item.name}</b><small>{item.description}</small></div><button disabled={gold < item.cost || sold.includes(item.id)} onClick={() => buyItem(item.id)}>{sold.includes(item.id) ? 'SOLD' : <><Coins size={13} /> {item.cost}</>}</button></div>)}</div><div className="dialog-foot"><span><Coins size={14} /> Purse</span><b>{gold} G</b></div></>}
           {modal === 'items' && <><div className="dialog-kicker">YOUR PACK</div><h2>Carry a little magic.</h2><p className="dialog-description">{selectedUnitForItem === 'choose' ? `Choose a hero for ${pendingItem?.replaceAll('-', ' ') ?? 'this item'}.` : 'Select an item to use during this stage.'}</p><div className="inventory-list">{shopItems.map((item) => <button key={item.id} disabled={items[item.id] < 1} className="inventory-row" onClick={() => handleInventoryItem(item.id)}><span className="inventory-count">{items[item.id]}</span><span><b>{item.name}</b><small>{item.description}</small></span><ChevronRight size={15} /></button>)}</div>{selectedUnitForItem && <div className="item-targets"><b>USE ON</b>{party.map((unit) => <button key={unit.id} disabled={pendingItem === 'revive-feather' ? unit.hp > 0 : unit.hp <= 0} onClick={() => { setSelectedUnitForItem(unit.id); setMessage(`${unit.name} selected.`) }} className={selectedUnitForItem === unit.id ? 'picked' : ''}><Avatar unit={unit} compact />{unit.name} <small>{unit.hp}/{unit.maxHp}</small></button>)}</div>}</>}
-          {modal === 'team' && <><div className="dialog-kicker">COMPANY & FORMATION</div><h2>Your team, your tactics.</h2><p className="dialog-description">Click a squad member to change rows. Select a bench hero and a squad member to swap; dragging also works.</p><div className="team-tabs" role="tablist" aria-label="Team manager sections"><button role="tab" aria-selected={teamTab === 'squad'} className={teamTab === 'squad' ? 'active' : ''} onClick={() => setTeamTab('squad')}>YOUR SQUAD & BENCH</button><button role="tab" aria-selected={teamTab === 'enemies'} className={teamTab === 'enemies' ? 'active' : ''} onClick={() => setTeamTab('enemies')}>STAGE ENEMIES ({enemies.length})</button></div>
-            {teamTab === 'squad' ? <><div className="formation-summary"><span>FRONT ROW <small>Tank +25% DEF · Assassin +20% Physical ATK</small></span><span>BACK ROW <small>Attacker +20% Physical ATK · Mage +20% Magic ATK · Healer +25% Healing</small></span></div><div className="team-roster">{roster.map((unit) => { const inTeam = teamIds.includes(unit.id); const bonus = formationBonus(unit); return <button key={unit.id} draggable={!inTeam} onDragStart={(event) => { event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', unit.id); setSelectedTeamSwapId(unit.id) }} onDragOver={(event) => { if (inTeam) event.preventDefault() }} onDrop={(event) => { event.preventDefault(); dropTeamMember(unit, event.dataTransfer.getData('text/plain')) }} className={`team-member ${inTeam ? 'in-team' : ''} ${selectedTeamSwapId === unit.id ? 'swap-selected' : ''} ${unit.hp <= 0 ? 'fallen' : ''}`} onClick={() => chooseTeamMember(unit)}><Avatar unit={unit} compact /><span className="team-member-info"><b>{unit.name}</b><small>{unit.role} · {unit.attributes.join('/')}</small><small>Passive: {unit.ability}</small><small>Skills: {unit.skills.map((skill) => skill.name).join(' · ')}</small></span><span className="team-member-stats">HP {unit.hp}/{unit.maxHp}<small>PHY {unit.physAtk} · MAG {unit.magAtk} · DEF {unit.def} · SPD {unit.spd}</small>{inTeam && <i>{unit.row} {bonus.phys ? '· +20% ATK' : bonus.def ? '· +25% DEF' : bonus.mag ? '· +20% MATK' : bonus.heal ? '· +25% heal' : '· no row bonus'}</i>}</span><span className="team-marker">{inTeam ? 'IN PARTY' : 'BENCH'}</span></button> })}</div></> : <div className="team-enemies">{enemies.length ? enemies.map((unit) => <article key={unit.id}><Avatar unit={unit} compact /><span><b>{unit.name}</b><small>{unit.role} · {unit.attributes.join(' / ')} · {unit.hp}/{unit.maxHp} HP</small><small>PHY ATK {unit.physAtk} · MAG ATK {unit.magAtk} · DEF {unit.def} · SPD {unit.spd}</small><small>PASSIVE · {unit.ability}</small><small>BASIC · {unit.skills[0].name} — {unit.skills[0].description}</small><small>ULTIMATE · {unit.skills[3].name} — {unit.skills[3].description}</small></span></article>) : <p className="dialog-description">There are no enemies at this camp.</p>}</div>}
-            <div className="dialog-actions"><button className="gold-button" onClick={() => { setModal(null); setSelectedTeamSwapId(null) }}>Done · {teamIds.length}/5 <ChevronRight size={15} /></button></div></>}
+          {modal === 'team' && <>
+            <div className="dialog-kicker">COMPANY & FORMATION</div>
+            <h2>Your team, your tactics.</h2>
+            <p className="dialog-description">Select a hero, then choose a glowing formation slot to move or replace a teammate.</p>
+            <div className="team-tabs" role="tablist" aria-label="Team manager sections">
+              <button role="tab" aria-selected={teamTab === 'squad'} className={teamTab === 'squad' ? 'active' : ''} onClick={() => setTeamTab('squad')}>SQUAD & FORMATION</button>
+              <button role="tab" aria-selected={teamTab === 'enemies'} className={teamTab === 'enemies' ? 'active' : ''} onClick={() => setTeamTab('enemies')}>STAGE ENEMIES ({enemies.length})</button>
+            </div>
+            {teamTab === 'squad' ? <div className="team-manager">
+              <div className="formation-board">
+                <div className="formation-map-heading"><b>BACK · 3 SLOTS</b><b>FRONT · 2 SLOTS</b></div>
+                <div className="formation-map">
+                  {PLAYER_SLOTS.map((slot) => {
+                    const row = slot.row === 'front' ? 'Front' : 'Back'
+                    const rowSlots = PLAYER_SLOTS.filter((candidate) => candidate.row === slot.row)
+                    const slotIndex = rowSlots.findIndex((candidate) => candidate.slot === slot.slot)
+                    const unit = party.filter((member) => (member.row ?? 'Back') === row)[slotIndex]
+                    const bonus = unit ? formationBonus({ ...unit, row }) : null
+                    const buffActive = bonus ? bonus.phys > 0 || bonus.mag > 0 || bonus.def > 0 || bonus.heal > 0 : false
+                    const targetable = Boolean(selectedTeamSwapId && selectedTeamSwapId !== unit?.id)
+                    return <article className={`formation-slot-wrap formation-slot-position formation-${slot.row} ${targetable ? 'slot-targetable' : ''}`} key={`${row}-${slot.slot}`} style={{ left: row === 'Back' ? '28%' : '72%', top: `${slot.y}%`, zIndex: slot.zIndex }}>
+                      <button className={`formation-slot ${unit ? '' : 'empty'} ${unit && selectedTeamSwapId === unit.id ? 'swap-selected' : ''} ${targetable ? 'slot-targetable' : ''}`} onClick={() => {
+                        if (selectedTeamSwapId) chooseFormationSlot(row, unit?.id)
+                        else if (unit) chooseTeamMember(unit)
+                      }}>
+                        {unit ? <>
+                          <Avatar unit={unit} />
+                          <b>{unit.name}</b>
+                          <span>{unit.role} · {unit.attributes.join(' / ')}</span>
+                          <span className="formation-hp">HP {unit.hp}/{unit.maxHp}</span>
+                          <HealthBar unit={unit} />
+                          <i className={buffActive ? 'buff-active' : ''}>{buffActive ? 'ROW BUFF ACTIVE' : 'NO ROW BUFF'}</i>
+                        </> : <>
+                          <span className="empty-slot-mark">+</span>
+                          <b>OPEN SLOT</b>
+                          <span>{selectedTeamSwapId ? 'CLICK TO MOVE HERE' : 'SELECT A HERO'}</span>
+                        </>}
+                        {targetable && <strong className="slot-target-label">CLICK TO SWAP / MOVE HERE</strong>}
+                      </button>
+                      {unit && <button className="move-to-bench" disabled={teamIds.length <= 1} onClick={() => moveToBench(unit)}>MOVE TO BENCH</button>}
+                    </article>
+                  })}
+                </div>
+              </div>
+              <aside className="team-bench">
+                <header><b>RECRUITED BENCH</b><span>{roster.length - teamIds.length} available</span></header>
+                <div className="bench-roster">{roster.filter((unit) => !teamIds.includes(unit.id)).map((unit) => <article className={`bench-card ${selectedTeamSwapId === unit.id ? 'swap-selected' : ''}`} key={unit.id}>
+                  <button className="bench-hero-select" onClick={() => chooseTeamMember(unit)} aria-pressed={selectedTeamSwapId === unit.id}>
+                    <Avatar unit={unit} compact />
+                    <span><b>{unit.name}</b><small>{unit.role} · {unit.attributes.join(' / ')}</small><small>HP {unit.hp}/{unit.maxHp} · PHY {unit.physAtk} · MAG {unit.magAtk}</small></span>
+                  </button>
+                  <button className="bench-swap-button" onClick={() => swapInBench(unit)}>{teamIds.length < 5 ? 'SWAP IN' : 'SELECT TO SWAP'}</button>
+                </article>)}</div>
+              </aside>
+            </div> : <div className="team-enemies">{enemies.length ? enemies.map((unit) => <article key={unit.id}><Avatar unit={unit} compact /><span><b>{unit.name}</b><small>{unit.role} · {unit.attributes.join(' / ')} · {unit.hp}/{unit.maxHp} HP</small><small>PHY ATK {unit.physAtk} · MAG ATK {unit.magAtk} · DEF {unit.def} · SPD {unit.spd}</small><small>PASSIVE · {unit.ability}</small><small>BASIC · {unit.skills[0].name} — {unit.skills[0].description}</small><small>ULTIMATE · {unit.skills[3].name} — {unit.skills[3].description}</small></span></article>) : <p className="dialog-description">There are no enemies at this camp.</p>}</div>}
+            <div className="dialog-actions"><button className="gold-button" onClick={() => { setModal(null); setSelectedTeamSwapId(null) }}>DONE / BACK <ChevronRight size={15} /></button></div>
+          </>}
         </section>
       </div>}
 
-      {cutIn && <div className={`ultimate-cutin ${cutIn.isBoss ? 'boss-cutin' : ''}`}><div className="cutin-flash" /><UnitSprite unit={cutIn} combat /><div><span>{cutIn.isBoss ? 'BOSS ULTIMATE' : 'HEROIC ULTIMATE'}</span><h2>{cutIn.name}</h2><b>{cutIn.skills[3].name}</b></div><i>✦</i></div>}
+      {cutIn && <div className={`ultimate-cutin ${cutIn.isBoss ? 'boss-cutin' : ''}`}><div className="cutin-flash" /><UnitSprite unit={cutIn} combat facing={cutIn.isBoss || cutIn.isMinion ? 'left' : 'right'} /><div><span>{cutIn.isBoss ? 'BOSS ULTIMATE' : 'HEROIC ULTIMATE'}</span><h2>{cutIn.name}</h2><b>{cutIn.skills[3].name}</b></div><i>✦</i></div>}
     </main>
   )
 }

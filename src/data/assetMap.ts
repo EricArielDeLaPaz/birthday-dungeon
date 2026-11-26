@@ -1,145 +1,72 @@
 export interface UnitAssetConfig {
-  pixelSprite: string;
-  combatIllustration?: string; // Bottom-left side stance (Heroes/Hostages) or Boss Ult Cut-In
-  scale: number;               // Relative visual height multiplier on the circle pad
-  footOffsetPx: number;        // Fine vertical grounding inside the formation circle
+  pixelSprite?: string
+  combatIllustration?: string
+  scale: number
+  footOffsetPx: number
+  flipX?: boolean
 }
 
-export const HERO_ASSETS: Record<string, UnitAssetConfig> = {
-  // 4 Starter Heroes
-  seraphina: {
-    pixelSprite: './assets/sprites/heroes/seraphina.png',
-    combatIllustration: './assets/illustrations/heroes/seraphina-combat.png',
-    scale: 1.05,
-    footOffsetPx: 4,
-  },
-  kaelen: {
-    pixelSprite: './assets/sprites/heroes/kaelen.png',
-    combatIllustration: './assets/illustrations/heroes/kaelen-combat.png',
-    scale: 1.0,
-    footOffsetPx: 4,
-  },
-  bram: {
-    pixelSprite: './assets/sprites/heroes/bram.png',
-    combatIllustration: './assets/illustrations/heroes/bram-combat.png',
-    scale: 1.12,
-    footOffsetPx: 6,
-  },
-  lyra: {
-    pixelSprite: './assets/sprites/heroes/lyra.png',
-    combatIllustration: './assets/illustrations/heroes/lyra-combat.png',
-    scale: 1.02,
-    footOffsetPx: 4,
-  },
+const spriteFiles = import.meta.glob('../assets/sprites/*.png', {
+  eager: true,
+  query: '?url',
+  import: 'default',
+}) as Record<string, string>
+const backgroundFiles = import.meta.glob('../assets/backgrounds/*.png', {
+  eager: true,
+  query: '?url',
+  import: 'default',
+}) as Record<string, string>
 
-  // 10 Recruitable Hostages (Beings & Mythical Creatures)
-  'sylph-archer': {
-    pixelSprite: './assets/sprites/heroes/sylph-archer.png',
-    combatIllustration: './assets/illustrations/heroes/sylph-archer-combat.png',
-    scale: 1.0,
-    footOffsetPx: 4,
-  },
-  'cinder-drake': {
-    pixelSprite: './assets/sprites/heroes/cinder-drake.png',
-    combatIllustration: './assets/illustrations/heroes/cinder-drake-combat.png',
-    scale: 1.04,
-    footOffsetPx: 4,
-  },
-  'obsidian-golem': {
-    pixelSprite: './assets/sprites/heroes/obsidian-golem.png',
-    combatIllustration: './assets/illustrations/heroes/obsidian-golem-combat.png',
-    scale: 1.15,
-    footOffsetPx: 6,
-  },
-  'moonlit-kitsune': {
-    pixelSprite: './assets/sprites/heroes/moonlit-kitsune.png',
-    combatIllustration: './assets/illustrations/heroes/moonlit-kitsune-combat.png',
-    scale: 1.0,
-    footOffsetPx: 4,
-  },
-  'gale-griffon': {
-    pixelSprite: './assets/sprites/heroes/gale-griffon.png',
-    combatIllustration: './assets/illustrations/heroes/gale-griffon-combat.png',
-    scale: 1.08,
-    footOffsetPx: 2,
-  },
-  'sunforge-paladin': {
-    pixelSprite: './assets/sprites/heroes/sunforge-paladin.png',
-    combatIllustration: './assets/illustrations/heroes/sunforge-paladin-combat.png',
-    scale: 1.12,
-    footOffsetPx: 5,
-  },
-  'bramble-dryad': {
-    pixelSprite: './assets/sprites/heroes/bramble-dryad.png',
-    combatIllustration: './assets/illustrations/heroes/bramble-dryad-combat.png',
-    scale: 1.04,
-    footOffsetPx: 4,
-  },
-  'ember-ronin': {
-    pixelSprite: './assets/sprites/heroes/ember-ronin.png',
-    combatIllustration: './assets/illustrations/heroes/ember-ronin-combat.png',
-    scale: 1.05,
-    footOffsetPx: 4,
-  },
-  'frost-wraith': {
-    pixelSprite: './assets/sprites/heroes/frost-wraith.png',
-    combatIllustration: './assets/illustrations/heroes/frost-wraith-combat.png',
-    scale: 1.05,
-    footOffsetPx: 0,
-  },
-  'starlight-falcon': {
-    pixelSprite: './assets/sprites/heroes/starlight-falcon.png',
-    combatIllustration: './assets/illustrations/heroes/starlight-falcon-combat.png',
-    scale: 1.0,
-    footOffsetPx: 0,
-  },
-};
+const spriteUrl = (fileName: string) => spriteFiles[`../assets/sprites/${fileName}.png`]
+const heroAsset = (fileName: string, scale = 1, footOffsetPx = 4): UnitAssetConfig => ({
+  pixelSprite: spriteUrl(fileName),
+  scale,
+  footOffsetPx,
+  flipX: false,
+})
+
+export const HERO_ASSETS: Record<string, UnitAssetConfig> = {
+  seraphina: heroAsset('seraphina', 1.05),
+  kaelen: heroAsset('kaelen'),
+  bram: heroAsset('bram', 1.12, 6),
+  lyra: heroAsset('lyra'),
+  mira: heroAsset('mira'),
+  thorn: heroAsset('thorn', 1.08, 5),
+  nyx: heroAsset('nyx'),
+  ember: heroAsset('ember'),
+  syl: heroAsset('syl', 1.04),
+  zephyr: heroAsset('zephyr'),
+  aurelia: heroAsset('aurelia'),
+  glacia: heroAsset('glacia'),
+}
 
 export const ENEMY_ASSETS: Record<string, UnitAssetConfig> = {
-  // 3 High-Detail Scary Bosses (Huge scale + Illustrated Ultimate Cut-In)
-  'boss-bone-dragon': {
-    pixelSprite: './assets/bosses/boss-bone-dragon.png',
-    combatIllustration: './assets/bosses/boss-bone-dragon-ult.png',
-    scale: 1.9,
-    footOffsetPx: 10,
-  },
-  'boss-choir-monolith': {
-    pixelSprite: './assets/bosses/boss-choir-monolith.png',
-    combatIllustration: './assets/bosses/boss-choir-monolith-ult.png',
-    scale: 1.85,
-    footOffsetPx: 10,
-  },
-  'boss-eclipse-seraph': {
-    pixelSprite: './assets/bosses/boss-eclipse-seraph.png',
-    combatIllustration: './assets/bosses/boss-eclipse-seraph-ult.png',
-    scale: 1.95,
-    footOffsetPx: 8,
-  },
+  'boss-bone-dragon': { scale: 1.9, footOffsetPx: 10 },
+  'boss-choir-monolith': { scale: 1.85, footOffsetPx: 10 },
+  'boss-eclipse-seraph': { scale: 1.95, footOffsetPx: 8 },
+  'minidragon-fire': { scale: 1, footOffsetPx: 4 },
+  'minidragon-ice': { scale: 1, footOffsetPx: 4 },
+  'minidragon-earth': { scale: 1.04, footOffsetPx: 4 },
+  'minidragon-sound': { scale: 1, footOffsetPx: 4 },
+  'minidragon-light': { scale: 1, footOffsetPx: 4 },
+  'minion-crypt-knight': { scale: 1.08, footOffsetPx: 5 },
+  'minion-dread-stalker': { scale: 1, footOffsetPx: 4 },
+  'minion-ash-cultist': { scale: 1.02, footOffsetPx: 4 },
+  'minion-plague-cantor': { scale: 1.02, footOffsetPx: 4 },
+  'minion-bone-archer': { scale: 1, footOffsetPx: 4 },
+}
 
-  // Elemental Mini-Dragons (Bone Dragon Brood & Mid/Late Dungeon)
-  'minidragon-fire':  { pixelSprite: './assets/sprites/enemies/minidragon-fire.png',  scale: 1.0, footOffsetPx: 4 },
-  'minidragon-ice':   { pixelSprite: './assets/sprites/enemies/minidragon-ice.png',   scale: 1.0, footOffsetPx: 4 },
-  'minidragon-earth': { pixelSprite: './assets/sprites/enemies/minidragon-earth.png', scale: 1.04, footOffsetPx: 4 },
-  'minidragon-sound': { pixelSprite: './assets/sprites/enemies/minidragon-sound.png', scale: 1.0, footOffsetPx: 4 },
-  'minidragon-light': { pixelSprite: './assets/sprites/enemies/minidragon-light.png', scale: 1.0, footOffsetPx: 4 },
+const backgroundUrl = (fileName: string) => backgroundFiles[`../assets/backgrounds/${fileName}.png`]
 
-  // Scary Dungeon Minions (Normal size, basic animations only)
-  'minion-crypt-knight':  { pixelSprite: './assets/sprites/enemies/minion-crypt-knight.png',  scale: 1.08, footOffsetPx: 5 },
-  'minion-dread-stalker': { pixelSprite: './assets/sprites/enemies/minion-dread-stalker.png', scale: 1.0,  footOffsetPx: 4 },
-  'minion-ash-cultist':   { pixelSprite: './assets/sprites/enemies/minion-ash-cultist.png',   scale: 1.02, footOffsetPx: 4 },
-  'minion-plague-cantor': { pixelSprite: './assets/sprites/enemies/minion-plague-cantor.png', scale: 1.02, footOffsetPx: 4 },
-  'minion-bone-archer':   { pixelSprite: './assets/sprites/enemies/minion-bone-archer.png',   scale: 1.0,  footOffsetPx: 4 },
-};
-
-export const DUNGEON_BACKGROUNDS: Record<string, string> = {
-  'mossbound-crypt':  './assets/backgrounds/bg-mossbound-crypt.png',
-  'ashen-ossuary':    './assets/backgrounds/bg-ashen-ossuary.png',
-  'sunken-catacombs': './assets/backgrounds/bg-sunken-catacombs.png',
-  'echoing-vault':    './assets/backgrounds/bg-echoing-vault.png',
-  'starless-nave':    './assets/backgrounds/bg-starless-nave.png',
-  'eclipse-throne':   './assets/backgrounds/bg-eclipse-throne.png',
-  'campfire-rest':    './assets/backgrounds/bg-campfire-rest.png',
-};
+export const DUNGEON_BACKGROUNDS: Record<string, string | undefined> = {
+  'mossbound-crypt': backgroundUrl('bg-mossbound-crypt'),
+  'ashen-ossuary': backgroundUrl('bg-ashen-ossuary'),
+  'sunken-catacombs': backgroundUrl('bg-sunken-catacombs'),
+  'echoing-vault': backgroundUrl('bg-echoing-vault'),
+  'starless-nave': backgroundUrl('bg-starless-nave'),
+  'eclipse-throne': backgroundUrl('bg-eclipse-throne'),
+  'campfire-rest': backgroundUrl('bg-campfire-rest'),
+}
 
 export type AssetEntry = UnitAssetConfig & {
   pixelSpriteUrl?: string
@@ -164,20 +91,7 @@ const accents: Record<string, [string, string]> = {
   'minion-bone-archer': ['#B7AD98', '➶'],
 }
 
-const unitAssets: Record<string, UnitAssetConfig> = {
-  ...HERO_ASSETS,
-  ...ENEMY_ASSETS,
-  mira: HERO_ASSETS['sylph-archer'],
-  thorn: HERO_ASSETS['bramble-dryad'],
-  nyx: HERO_ASSETS['moonlit-kitsune'],
-  ember: HERO_ASSETS['ember-ronin'],
-  syl: HERO_ASSETS['bramble-dryad'],
-  zephyr: HERO_ASSETS['gale-griffon'],
-  aurelia: HERO_ASSETS['sunforge-paladin'],
-  glacia: HERO_ASSETS['frost-wraith'],
-  cinder: HERO_ASSETS['cinder-drake'],
-  orion: HERO_ASSETS['starlight-falcon'],
-}
+const unitAssets: Record<string, UnitAssetConfig> = { ...HERO_ASSETS, ...ENEMY_ASSETS }
 
 export const assetMap: Record<string, AssetEntry> = Object.fromEntries(
   Object.keys(accents).map((id) => {

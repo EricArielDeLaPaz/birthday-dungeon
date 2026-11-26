@@ -20,6 +20,7 @@ export type Stage = {
   title: string
   enemies: string[]
   hostages: number
+  hostageRecruitIds?: string[]
   reward: number
   description: string
 }
@@ -49,22 +50,23 @@ const stage = (
   hostages: number,
   reward: number,
   description: string,
-): Stage => ({ number, ...areaAt(number), kind, title, enemies, hostages, reward, description })
+  hostageRecruitIds?: string[],
+): Stage => ({ number, ...areaAt(number), kind, title, enemies, hostages, reward, description, hostageRecruitIds })
 
 export const stages: Stage[] = [
-  stage(1, 'fight', 'The Rootbound Gate', ['minion-crypt-knight', 'minion-dread-stalker'], 1, 45, 'Moss-covered stone gives way beneath the old forest.'),
+  stage(1, 'fight', 'The Rootbound Gate', ['minion-dread-stalker'], 2, 45, 'Moss-covered stone gives way beneath the old forest.', ['mira', 'thorn']),
   stage(2, 'camp', 'Lantern Rest', [], 0, 0, 'A sheltered fire glows beneath the roots.'),
-  stage(3, 'fight', 'The Green Sepulcher', ['minion-ash-cultist', 'minion-bone-archer', 'minion-plague-cantor'], 2, 55, 'A burial chamber stirs with thorn and ash.'),
-  stage(4, 'fight', 'Pillars of the Unquiet', ['minion-crypt-knight', 'minion-dread-stalker', 'minidragon-fire'], 1, 65, 'Bone pillars crowd a hall of smoldering braziers.'),
+  stage(3, 'fight', 'The Green Sepulcher', ['minion-ash-cultist', 'minion-bone-archer'], 1, 65, 'A burial chamber stirs with thorn and ash.', ['nyx']),
+  stage(4, 'fight', 'Pillars of the Unquiet', ['minion-crypt-knight', 'minion-dread-stalker', 'minidragon-fire'], 2, 85, 'Bone pillars crowd a hall of smoldering braziers.', ['ember', 'syl']),
   stage(5, 'boss', 'Vaelgor’s Ossuary', ['boss-bone-dragon', 'minidragon-fire', 'minidragon-ice', 'minidragon-earth'], 0, 120, 'The Bone Dragon descends with its three surviving brood.'),
-  stage(6, 'fight', 'The Drowned Stair', ['minion-plague-cantor', 'minion-dread-stalker', 'minidragon-ice'], 1, 65, 'Black water laps at stairs sunk beneath the earth.'),
-  stage(7, 'fight', 'The Silted Reliquary', ['minion-crypt-knight', 'minion-bone-archer', 'minion-ash-cultist', 'minidragon-earth'], 2, 75, 'Relics glimmer below the flooded flagstones.'),
+  stage(6, 'fight', 'The Drowned Stair', ['minion-plague-cantor', 'minion-dread-stalker', 'minidragon-ice'], 2, 90, 'Black water laps at stairs sunk beneath the earth.', ['zephyr', 'aurelia']),
+  stage(7, 'fight', 'The Silted Reliquary', ['minion-crypt-knight', 'minion-bone-archer', 'minion-ash-cultist', 'minidragon-earth'], 1, 100, 'Relics glimmer below the flooded flagstones.', ['glacia']),
   stage(8, 'camp', 'The Dry Bell', [], 0, 0, 'A raised stone island offers a rare, dry place to rest.'),
-  stage(9, 'fight', 'The Listening Gallery', ['minion-dread-stalker', 'minion-plague-cantor', 'minidragon-sound'], 1, 80, 'Whispering echoes travel through the drowned vault.'),
+  stage(9, 'fight', 'The Listening Gallery', ['minion-dread-stalker', 'minion-plague-cantor', 'minidragon-sound'], 2, 115, 'Whispering echoes travel through the drowned vault.', ['cinder', 'orion']),
   stage(10, 'boss', 'The Resonant Heart', ['boss-choir-monolith', 'minion-crypt-knight', 'minion-plague-cantor'], 0, 145, 'A monolith sings through the stone, shielded by its keepers.'),
-  stage(11, 'fight', 'The Astral Ossuary', ['minion-bone-archer', 'minion-ash-cultist', 'minion-dread-stalker'], 1, 80, 'Starless constellations mark the walls above the dead.'),
+  stage(11, 'fight', 'The Astral Ossuary', ['minion-bone-archer', 'minion-ash-cultist', 'minion-dread-stalker'], 0, 110, 'Starless constellations mark the walls above the dead.'),
   stage(12, 'camp', 'Wayfarer’s Ember', [], 0, 0, 'One last quiet hearth burns before the upper nave.'),
-  stage(13, 'fight', 'The Choirless Nave', ['minion-plague-cantor', 'minion-crypt-knight', 'minidragon-light'], 2, 90, 'An empty cathedral waits beneath a hollow sky.'),
-  stage(14, 'fight', 'The Eclipse Threshold', ['minion-ash-cultist', 'minion-dread-stalker', 'minion-bone-archer', 'minidragon-fire'], 3, 100, 'The last guards stand beneath the eclipsed arch.'),
+  stage(13, 'fight', 'The Choirless Nave', ['minion-plague-cantor', 'minion-crypt-knight', 'minidragon-light'], 0, 125, 'An empty cathedral waits beneath a hollow sky.'),
+  stage(14, 'fight', 'The Eclipse Threshold', ['minion-ash-cultist', 'minion-dread-stalker', 'minion-bone-archer', 'minidragon-fire'], 0, 150, 'The last guards stand beneath the eclipsed arch.'),
   stage(15, 'boss', 'The Eclipse Throne', ['boss-eclipse-seraph'], 0, 220, 'Nyx-Aurelia waits alone where light and shadow meet.'),
 ]

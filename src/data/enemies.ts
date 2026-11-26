@@ -1,5 +1,19 @@
 import type { Attribute, Role, Skill, Unit } from '../engine/combat'
 
+const conciseDescription = (power: number, type: Skill['type'], target: Skill['target'], effect?: Skill['effect'], selfEffect?: Skill['selfEffect']) => {
+  const targetName = target === 'all-enemies' ? 'all enemies' : target === 'all-allies' ? 'all allies' : target === 'ally' ? 'one ally' : '1 enemy'
+  const description = type === 'heal'
+    ? power > 0 ? `Heals ${targetName} by ${power}% of Max HP.` : `Supports ${targetName}.`
+    : `Deals ${power}% ${type === 'physical' ? 'Phys' : 'Mag'} ATK to ${targetName}.`
+  const effects = [effect, selfEffect].flatMap((value) => value ? Array.isArray(value) ? value : [value] : [])
+  const effectText = [...new Set(effects)].map((kind) => kind === 'Stealth'
+    ? 'Grants Stealth for 2 turns (evades attacks).'
+    : kind === 'ATK Up' || kind === 'DEF Up'
+      ? `Grants ${kind} (2t).`
+      : `Inflicts ${kind} (2t).`)
+  return [description, ...effectText].join(' ')
+}
+
 const skill = (
   name: string,
   cost: number,
@@ -7,11 +21,11 @@ const skill = (
   attribute: Attribute,
   type: Skill['type'],
   target: Skill['target'],
-  description: string,
+  _description: string,
   effect?: Skill['effect'],
   selfEffect?: Skill['selfEffect'],
   additionalAttributes?: Skill['additionalAttributes'],
-): Skill => ({ name, cost, power, attribute, type, target, description, effect, selfEffect, additionalAttributes })
+): Skill => ({ name, cost, power, attribute, type, target, description: conciseDescription(power, type, target, effect, selfEffect), effect, selfEffect, additionalAttributes })
 
 const enemy = (
   id: string,
@@ -39,7 +53,7 @@ const basic = (
   selfEffect?: Skill['selfEffect'],
 ) => skill(name, 0, power, attribute, type, target, description, effect, selfEffect)
 
-const placeholder = skill('Guard', 0, 0, 'Earth', 'heal', 'all-allies', 'A practiced stance.')
+const placeholder = { ...skill('Guard', 0, 0, 'Earth', 'heal', 'all-allies', 'A practiced stance.'), description: 'Unused enemy skill slot.' }
 const ultimate = (
   name: string,
   attribute: Attribute,
