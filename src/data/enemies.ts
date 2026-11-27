@@ -3,15 +3,17 @@ import type { Attribute, Role, Skill, Unit } from '../engine/combat'
 const conciseDescription = (power: number, type: Skill['type'], target: Skill['target'], effect?: Skill['effect'], selfEffect?: Skill['selfEffect']) => {
   const targetName = target === 'all-enemies' ? 'all enemies' : target === 'all-allies' ? 'all allies' : target === 'ally' ? 'one ally' : '1 enemy'
   const description = type === 'heal'
-    ? power > 0 ? `Heals ${targetName} by ${power}% of Max HP.` : `Supports ${targetName}.`
+    ? power > 0 ? `Heals ${targetName} by ${power}% of Max HP.` : ''
     : `Deals ${power}% ${type === 'physical' ? 'Phys' : 'Mag'} ATK to ${targetName}.`
-  const effects = [effect, selfEffect].flatMap((value) => value ? Array.isArray(value) ? value : [value] : [])
-  const effectText = [...new Set(effects)].map((kind) => kind === 'Stealth'
-    ? 'Grants Stealth for 2 turns (evades attacks).'
-    : kind === 'ATK Up' || kind === 'DEF Up'
-      ? `Grants ${kind} (2t).`
-      : `Inflicts ${kind} (2t).`)
-  return [description, ...effectText].join(' ')
+  const targetEffects = effect ? Array.isArray(effect) ? effect : [effect] : []
+  const effectText = [...new Set(targetEffects)].map((kind) => {
+    const turns = kind === 'Freeze' ? 1 : 2
+    const grants = ['ATK Up', 'DEF Up', 'Stealth'].includes(kind)
+    const effectTarget = target === 'all-enemies' ? 'all enemies' : target === 'all-allies' ? 'all allies' : target === 'ally' ? '1 ally' : '1 enemy'
+    return `${grants ? 'Grants' : 'Inflicts'} ${kind} (${turns}t) ${grants ? 'to' : 'on'} ${effectTarget}.`
+  })
+  if (selfEffect) effectText.push(`Grants ${selfEffect} for 2 turns.`)
+  return [description, ...effectText].filter(Boolean).join(' ')
 }
 
 const skill = (
@@ -38,7 +40,7 @@ const enemy = (
   options: Partial<Unit> = {},
 ): Unit => ({
   id, name, role, attributes, hp: stats[0], maxHp: stats[0], physAtk: stats[1],
-  magAtk: stats[2], def: stats[3], spd: stats[4], ability, passive: ability,
+  magAtk: stats[2], def: stats[3], spd: Math.min(stats[4], 90), ability, passive: ability,
   skills, statuses: [], gauge: [0, 0, 0], ...options,
 })
 
@@ -53,7 +55,7 @@ const basic = (
   selfEffect?: Skill['selfEffect'],
 ) => skill(name, 0, power, attribute, type, target, description, effect, selfEffect)
 
-const placeholder = { ...skill('Guard', 0, 0, 'Earth', 'heal', 'all-allies', 'A practiced stance.'), description: 'Unused enemy skill slot.' }
+const placeholder = { ...skill('Unused Skill', 0, 0, 'Earth', 'heal', 'all-allies', 'No effect.'), description: 'No effect; this skill slot is unused.' }
 const ultimate = (
   name: string,
   attribute: Attribute,
@@ -120,11 +122,11 @@ export const minions: Unit[] = [
 ]
 
 export const bosses: Unit[] = [
-  enemy('boss-bone-dragon', 'Vaelgor, The Bone Dragon', 'Attacker', ['Shadow'], [640, 56, 38, 24, 28], 'Draconic Ossuary · gains 12% ATK for each living Mini-Dragon.', [
-    basic('Grave Fang', 'Shadow', 'physical', 'enemy', 145, 'A crushing necrotic bite lays a two-turn Curse.', 'Curse'),
+  enemy('boss-bone-dragon', 'Vaelgor, The Eternal Bone Dragon', 'Attacker', ['Light', 'Shadow', 'Ice', 'Fire', 'Sound', 'Earth'], [8500, 240, 180, 120, 1], 'Ossuary Aegis · permanently reduces incoming damage by 25%; all opposing attributes cancel.', [
+    basic('Abyssal Plague Breath', 'Shadow', 'magic', 'all-enemies', 115, 'Breathes a plague across the active party.', ['Burn', 'Curse', 'Freeze']),
     placeholder, placeholder,
-    ultimate('Bone Tempest', 'Shadow', 'physical', 'all-enemies', 175, 'A skeletal gale batters the whole party and inflicts Curse.', 'Curse'),
-  ], { isBoss: true, bossUltimate: true }),
+    ultimate('Sovereign Execution', 'Shadow', 'physical', 'enemy', 400, 'Executes the frontmost active hero, then the backmost row.'),
+  ], { isBoss: true, isColossal: true, bossUltimate: true }),
   enemy('boss-choir-monolith', 'Choir-Warden Monolith', 'Tank', ['Sound', 'Earth'], [790, 39, 48, 38, 17], 'Resonant Stone · Sound/Earth cancellation; takes 15% less damage above half HP.', [
     basic('Shatter Chime', 'Earth', 'magic', 'enemy', 125, 'A resonant earth strike leaves a two-turn Burn.', 'Burn'),
     placeholder, placeholder,
@@ -134,6 +136,11 @@ export const bosses: Unit[] = [
     basic('Eclipse Brand', 'Light', 'magic', 'all-enemies', 16, 'Solar stance: a light brand strikes the whole party.'),
     placeholder, placeholder,
     ultimate('Shattered Halo', 'Light', 'magic', 'all-enemies', 190, 'A devastating Light and Shadow strike inflicts Burn and Curse.', ['Burn', 'Curse'], undefined, ['Shadow']),
+  ], { isBoss: true, bossUltimate: true }),
+  enemy('boss-frostfire', 'Kryo-Ignis, The Frostfire Sovereign', 'Mage', ['Ice', 'Fire'], [1850, 98, 145, 55, 39], 'Frostfire Balance · Ice and Fire attacks deal neutral damage.', [
+    basic('Frostfire Lance', 'Fire', 'magic', 'enemy', 160, 'Deals a focused Frostfire strike.'),
+    placeholder, placeholder,
+    ultimate('Frostfire Cataclysm', 'Fire', 'magic', 'all-enemies', 180, 'Blasts all active heroes with frost and flame.', ['Freeze', 'Burn'], undefined, ['Ice']),
   ], { isBoss: true, bossUltimate: true }),
 ]
 

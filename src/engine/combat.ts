@@ -1,6 +1,6 @@
 export type Attribute = 'Light' | 'Shadow' | 'Ice' | 'Fire' | 'Sound' | 'Earth'
 export type Role = 'Tank' | 'Assassin' | 'Attacker' | 'Mage' | 'Healer'
-export type StatusKind = 'Burn' | 'Curse' | 'Taunt' | 'Stealth' | 'ATK Up' | 'DEF Up' | 'DEF Down'
+export type StatusKind = 'Burn' | 'Curse' | 'Taunt' | 'Stealth' | 'ATK Up' | 'DEF Up' | 'DEF Down' | 'Freeze'
 export type StatusEffect = { kind: StatusKind; turns: number }
 export type Skill = {
   name: string
@@ -12,6 +12,8 @@ export type Skill = {
   target: 'enemy' | 'all-enemies' | 'ally' | 'all-allies'
   effect?: StatusKind | StatusKind[]
   selfEffect?: StatusKind
+  gaugeDrain?: number
+  cleanseDebuffs?: boolean
   description: string
 }
 export type Unit = {
@@ -31,11 +33,13 @@ export type Unit = {
   statuses: StatusEffect[]
   gauge: [number, number, number]
   isBoss?: boolean
+  isColossal?: boolean
   isMinion?: boolean
   bossUltimate?: boolean
   passiveUsed?: boolean
   art?: string
   row?: 'Front' | 'Back'
+  freezeImmuneTurns?: number
 }
 
 export type FloatingText = { id: number; targetId: string; text: string; kind: 'damage' | 'heal' | 'status' }
@@ -64,9 +68,14 @@ export function calculateDamage(attacker: Unit, defender: Unit, skill: Skill, at
   const stoneheartMitigation = defender.ability.startsWith('Stoneheart')
   const resonantMitigation = defender.ability.startsWith('Resonant Stone') && defender.hp / defender.maxHp > 0.5
   const passiveMitigation = stoneheartMitigation || resonantMitigation ? 0.85 : 1
+  const enemyAttack = attacker.isBoss || attacker.isMinion
+  const debuffAttack = Boolean(skill.effect && (Array.isArray(skill.effect) ? skill.effect : [skill.effect])
+    .some((kind) => !['ATK Up', 'DEF Up', 'Stealth'].includes(kind)))
+  const ossuaryMitigation = defender.ability.startsWith('Ossuary Aegis') ? 0.75 : 1
   const damage = attack * (1 + attackBonus) * (weakened ? 0.5 : 1) *
     (boosted ? 1.25 : 1) * skill.power / 100 * advantage - defense * 0.35
-  return Math.max(1, Math.round(damage * passiveMitigation))
+  return Math.max(1, Math.round(damage * passiveMitigation * ossuaryMitigation *
+    (enemyAttack ? 0.75 * (debuffAttack ? 0.75 : 1) : 1)))
 }
 
 export function chargeGauge(unit: Unit, skillIndex: number): Unit {
@@ -85,16 +94,20 @@ export function getTargetId(targets: Unit[]) {
 
 export function tickStatuses(unit: Unit): { unit: Unit; damage: number } {
   let damage = 0
+  const hadFreeze = unit.statuses.some((status) => status.kind === 'Freeze')
   const statuses = unit.statuses.flatMap((status) => {
     if (status.kind === 'Burn' || status.kind === 'Curse') {
       damage += Math.max(1, Math.round(unit.maxHp * (status.kind === 'Burn' ? 0.06 : 0.08)))
     }
     return status.turns > 1 ? [{ ...status, turns: status.turns - 1 }] : []
   })
-  return { unit: { ...unit, hp: Math.max(0, unit.hp - damage), statuses }, damage }
+  const hasFreeze = statuses.some((status) => status.kind === 'Freeze')
+  const freezeImmuneTurns = hadFreeze && !hasFreeze ? 1 : !hadFreeze ? Math.max(0, (unit.freezeImmuneTurns ?? 0) - 1) : unit.freezeImmuneTurns
+  return { unit: { ...unit, hp: Math.max(0, unit.hp - damage), statuses, freezeImmuneTurns }, damage }
 }
 
 export function addStatus(unit: Unit, kind: StatusKind, turns = 2): Unit {
+  if (kind === 'Freeze' && (unit.freezeImmuneTurns ?? 0) > 0) return unit
   return { ...unit, statuses: [...unit.statuses.filter((status) => status.kind !== kind), { kind, turns }] }
 }
 

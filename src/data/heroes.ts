@@ -1,25 +1,64 @@
 import type { Attribute, Role, Skill, Unit } from '../engine/combat'
 
-const conciseDescription = (power: number, type: Skill['type'], target: Skill['target'], effect?: Skill['effect'], selfEffect?: Skill['selfEffect']) => {
+const conciseDescription = (
+  power: number,
+  type: Skill['type'],
+  target: Skill['target'],
+  effect?: Skill['effect'],
+  selfEffect?: Skill['selfEffect'],
+  gaugeDrain = 0,
+  cleanseDebuffs = false,
+) => {
   const targetName = target === 'all-enemies' ? 'all enemies' : target === 'all-allies' ? 'all allies' : target === 'ally' ? 'one ally' : '1 enemy'
   const description = type === 'heal'
-    ? power > 0 ? `Heals ${targetName} by ${power}% of Max HP.` : `Supports ${targetName}.`
+    ? power > 0 ? `Heals ${targetName} by ${power}% of Max HP.` : ''
     : `Deals ${power}% ${type === 'physical' ? 'Phys' : 'Mag'} ATK to ${targetName}.`
-  const effects = [effect, selfEffect].flatMap((value) => value ? Array.isArray(value) ? value : [value] : [])
-  const effectText = [...new Set(effects)].map((kind) => kind === 'Stealth'
-    ? 'Grants Stealth for 2 turns (evades attacks).'
-    : kind === 'ATK Up' || kind === 'DEF Up'
-      ? `Grants ${kind} (2t).`
-      : `Inflicts ${kind} (2t).`)
-  return [description, ...effectText].join(' ')
+  const targetEffects = effect ? Array.isArray(effect) ? effect : [effect] : []
+  const effectText = [...new Set(targetEffects)].map((kind) => {
+    const turns = kind === 'Freeze' ? 1 : 2
+    const verb = ['ATK Up', 'DEF Up', 'Stealth'].includes(kind) ? 'Grants' : 'Inflicts'
+    const preposition = verb === 'Grants' ? 'to' : 'on'
+    const effectTarget = target === 'all-enemies' ? 'all enemies' : target === 'all-allies' ? 'all allies' : target === 'ally' ? '1 ally' : '1 enemy'
+    return `${verb} ${kind} (${turns}t) ${preposition} ${effectTarget}.`
+  })
+  if (selfEffect) effectText.push(`Grants ${selfEffect} for 2 turns.`)
+  if (gaugeDrain) effectText.push(`Reduces 1 enemy's Ultimate gauge by ${gaugeDrain}.`)
+  if (cleanseDebuffs) effectText.push(`Removes all debuffs from ${targetName}.`)
+  return [description, ...effectText].filter(Boolean).join(' ')
 }
 
-const skill = (name: string, cost: number, power: number, attribute: Attribute, type: Skill['type'], target: Skill['target'], _description: string, effect?: Skill['effect'], selfEffect?: Skill['selfEffect']): Skill =>
-  ({ name, cost, power, attribute, type, target, description: conciseDescription(power, type, target, effect, selfEffect), effect, selfEffect })
-
-const makeHero = (hero: Omit<Unit, 'statuses' | 'gauge'>): Unit => ({
-  ...hero, statuses: [], gauge: [0, 0, 0],
+const skill = (
+  name: string,
+  cost: number,
+  power: number,
+  attribute: Attribute,
+  type: Skill['type'],
+  target: Skill['target'],
+  _description: string,
+  effect?: Skill['effect'],
+  selfEffect?: Skill['selfEffect'],
+  gaugeDrain = 0,
+  cleanseDebuffs = false,
+): Skill => ({
+  name, cost, power, attribute, type, target, effect, selfEffect, gaugeDrain, cleanseDebuffs,
+  description: conciseDescription(power, type, target, effect, selfEffect, gaugeDrain, cleanseDebuffs),
 })
+
+const makeHero = (hero: Omit<Unit, 'statuses' | 'gauge'>): Unit => {
+  const hpScale = hero.role === 'Tank' ? 1.3 * 1.5 : 1.3
+  const maxHp = Math.round(hero.maxHp * hpScale)
+  return {
+    ...hero,
+    hp: maxHp,
+    maxHp,
+    physAtk: Math.round(hero.physAtk * 1.3),
+    magAtk: Math.round(hero.magAtk * 1.3),
+    def: Math.round(hero.def * 1.15),
+    spd: hero.role === 'Assassin' ? Math.max(100, hero.spd) : Math.min(70, hero.spd),
+    statuses: [],
+    gauge: [0, 0, 0],
+  }
+}
 
 const starter = (id: string, name: string, role: Role, attribute: Attribute, ability: string, stats: [number, number, number, number, number], skills: Unit['skills']): Unit =>
   makeHero({ id, name, role, attributes: [attribute], hp: stats[0], maxHp: stats[0], physAtk: stats[1], magAtk: stats[2], def: stats[3], spd: stats[4], ability, passive: ability, skills, art: id })
@@ -27,9 +66,9 @@ const starter = (id: string, name: string, role: Role, attribute: Attribute, abi
 export const heroes: Unit[] = [
   starter('seraphina', 'Seraphina', 'Healer', 'Light', 'Dawn’s Grace · heals 10% HP after each victory', [118, 22, 38, 13, 30], [
     skill('Sunlit Bolt', 0, 95, 'Light', 'magic', 'enemy', 'A measured beam of dawn.'),
-    skill('Mending Light', 2, 95, 'Light', 'heal', 'ally', 'Restore a single ally.', 'ATK Up'),
-    skill('Radiant Chorus', 3, 70, 'Light', 'heal', 'all-allies', 'Restore the entire party.'),
-    skill('Daybreak Benediction', 5, 125, 'Light', 'heal', 'all-allies', 'Massive party restoration and protection.', 'DEF Up'),
+    skill('Mending Light', 2, 95, 'Light', 'heal', 'ally', 'Restore a single ally.', 'ATK Up', undefined, 0, true),
+    skill('Radiant Chorus', 3, 70, 'Light', 'heal', 'all-allies', 'Restore the entire party.', undefined, undefined, 0, true),
+    skill('Daybreak Benediction', 5, 125, 'Light', 'heal', 'all-allies', 'Massive party restoration and protection.', 'DEF Up', undefined, 0, true),
   ]),
   starter('kaelen', 'Kaelen', 'Assassin', 'Shadow', 'Umbral Step · begins each battle with Stealth', [104, 45, 20, 10, 47], [
     skill('Gloomfang', 0, 110, 'Shadow', 'physical', 'enemy', 'A swift shadow-laced strike.'),
@@ -45,7 +84,7 @@ export const heroes: Unit[] = [
   ]),
   starter('lyra', 'Lyra', 'Mage', 'Ice', 'Frostweave · first Ice attack each battle deals +25%', [108, 19, 44, 11, 34], [
     skill('Frost Shard', 0, 105, 'Ice', 'magic', 'enemy', 'A sharp, precise ice spell.'),
-    skill('Glacier Lance', 2, 160, 'Ice', 'magic', 'enemy', 'Pierce one target with glacial force.'),
+    skill('Glacier Lance', 2, 160, 'Ice', 'magic', 'enemy', 'Freeze and drain a target.', 'Freeze', undefined, 2),
     skill('Snowblind', 3, 105, 'Ice', 'magic', 'all-enemies', 'Sweep the field in frost.'),
     skill('Winter’s Crown', 5, 175, 'Ice', 'magic', 'all-enemies', 'A storm of ancient winter.', 'DEF Down'),
   ]),

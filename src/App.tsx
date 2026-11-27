@@ -40,6 +40,7 @@ type SavedRun = {
   hostageOfferIds?: string[]
   enemyTurnIndex?: number
   sold?: ItemId[]
+  enemiesDefeated?: number
 }
 const initialItems: Record<ItemId, number> = {
   'healing-potion': 1, 'cleanse-herb': 0, 'valor-tonic': 0, 'ironbark-draught': 0, 'revive-feather': 0,
@@ -79,12 +80,28 @@ function firstLivingHero(roster: Unit[], teamIds: string[]) {
     .filter((unit): unit is Unit => unit !== undefined && unit.hp > 0))[0]
 }
 
+function replaceFallenWithBench(roster: Unit[], teamIds: string[]) {
+  const updatedRoster = [...roster]
+  const updatedTeamIds = [...teamIds]
+  const substitutions: Array<{ fallen: string; replacement: string }> = []
+  for (const [slotIndex, id] of updatedTeamIds.entries()) {
+    const fallen = updatedRoster.find((unit) => unit.id === id)
+    if (!fallen || fallen.hp > 0) continue
+    const replacement = updatedRoster.find((unit) => unit.hp > 0 && !updatedTeamIds.includes(unit.id))
+    if (!replacement) continue
+    updatedTeamIds[slotIndex] = replacement.id
+    const rosterIndex = updatedRoster.findIndex((unit) => unit.id === replacement.id)
+    updatedRoster[rosterIndex] = { ...replacement, row: fallen.row ?? 'Back' }
+    substitutions.push({ fallen: fallen.name, replacement: replacement.name })
+  }
+  return { roster: updatedRoster, teamIds: updatedTeamIds, substitutions }
+}
+
 function unitBattlePosition(unit: Unit, units: Unit[], side: 'heroes' | 'enemies') {
-  const living = units.filter((candidate) => candidate.hp > 0)
   if (side === 'heroes') {
     const row = unit.row ?? 'Back'
     const rowSlots = PLAYER_SLOTS.filter((slot) => slot.row === row.toLowerCase())
-    const rowIndex = living.filter((candidate) => (candidate.row ?? 'Back') === row)
+    const rowIndex = units.filter((candidate) => (candidate.row ?? 'Back') === row)
       .findIndex((candidate) => candidate.id === unit.id)
     const slot = rowSlots[Math.max(rowIndex, 0) % rowSlots.length]
     return { x: slot.x, y: slot.y }
@@ -92,7 +109,7 @@ function unitBattlePosition(unit: Unit, units: Unit[], side: 'heroes' | 'enemies
   const bossWithMinions = units.some((candidate) => candidate.isBoss) && units.some((candidate) => !candidate.isBoss)
   if (unit.isBoss && !bossWithMinions) return { x: 73, y: 52 }
   if (unit.isBoss) return { x: 84, y: 52 }
-  const index = living.filter((candidate) => !candidate.isBoss).findIndex((candidate) => candidate.id === unit.id)
+  const index = units.filter((candidate) => !candidate.isBoss).findIndex((candidate) => candidate.id === unit.id)
   const slots = ENEMY_SLOTS.filter((slot) => !bossWithMinions || slot.slot !== 3)
   const slot = slots[Math.max(index, 0) % slots.length]
   return { x: slot.x, y: slot.y }
@@ -239,23 +256,27 @@ function FormationPad({
 }) {
   const isEnemyPad = side === 'enemies'
   const formationSlots = isEnemyPad ? ENEMY_SLOTS : PLAYER_SLOTS
-  const livingUnits = units.filter((unit) => unit.hp > 0 || vfxEvent?.targetIds.includes(unit.id))
+  const colossalBoss = isEnemyPad && units.find((unit) => unit.isColossal)
+  const visibleUnits = units.filter((unit) => unit.hp > 0 || vfxEvent?.targetIds.includes(unit.id))
   const bossWithMinions = isEnemyPad && units.some((unit) => unit.isBoss) && units.some((unit) => !unit.isBoss)
-  const bossSolo = isEnemyPad && !bossWithMinions && livingUnits.length === 1 && livingUnits[0].isBoss
+  const bossSolo = isEnemyPad && !bossWithMinions && visibleUnits.length === 1 && visibleUnits[0].isBoss
   const enemyMinionSlots = ENEMY_SLOTS.filter((slot) => !bossWithMinions || slot.slot !== 3)
-  const placed = livingUnits.map((unit, index) => {
+  const placed = visibleUnits.map((unit) => {
+    const unitIndex = units.findIndex((candidate) => candidate.id === unit.id)
     let placement: { row: 'Front' | 'Back'; x: number; y: number; zIndex: number }
-    if (isEnemyPad) {
+    if (isEnemyPad && unit.isColossal) {
+      placement = { row: 'Back', x: 73, y: 52, zIndex: 30 }
+    } else if (isEnemyPad) {
       if (bossSolo) {
         placement = { row: 'Back', x: 73, y: 52, zIndex: 30 }
       } else if (unit.isBoss && bossWithMinions) {
         const slot = ENEMY_SLOTS[3]
         placement = { row: 'Back', x: slot.x, y: slot.y, zIndex: slot.zIndex }
       } else {
-        const minionIndex = livingUnits.slice(0, index).filter((candidate) => !candidate.isBoss).length
+        const minionIndex = units.slice(0, units.findIndex((candidate) => candidate.id === unit.id)).filter((candidate) => !candidate.isBoss).length
         const slot = bossWithMinions
           ? enemyMinionSlots[minionIndex]
-          : ENEMY_SLOTS[index]
+          : ENEMY_SLOTS[unitIndex]
         placement = {
           row: slot.row === 'front' ? 'Front' : 'Back',
           x: slot.x,
@@ -266,7 +287,7 @@ function FormationPad({
     } else {
       const row = unit.row ?? 'Back'
       const rowSlots = PLAYER_SLOTS.filter((slot) => slot.row === row.toLowerCase())
-      const rowIndex = livingUnits.filter((candidate) => (candidate.row ?? 'Back') === row)
+      const rowIndex = units.filter((candidate) => (candidate.row ?? 'Back') === row)
         .findIndex((candidate) => candidate.id === unit.id)
       const slot = rowSlots[rowIndex % rowSlots.length]
       placement = { row, x: slot.x, y: slot.y, zIndex: slot.zIndex }
@@ -276,10 +297,11 @@ function FormationPad({
 
   return (
     <div className={`formation-pad ${isEnemyPad ? 'enemy-formation' : 'player-formation'}`}>
-      {formationSlots.filter((slot) => !bossSolo || slot.slot !== 3).map((slot) => {
+      {formationSlots.filter(() => !colossalBoss && !bossSolo).map((slot) => {
         const row = slot.row === 'front' ? 'Front' : 'Back'
         return <span key={slot.slot} className={`pad-circle circle-${row.toLowerCase()}`} style={{ left: `${slot.x}%`, top: `${slot.y}%`, zIndex: slot.zIndex }} />
       })}
+      {(colossalBoss || bossSolo) && <span className={`colossal-boss-dais ${bossSolo ? 'solo-boss-dais' : ''}`} aria-hidden="true" />}
       {placed.map(({ unit, row, x, y, zIndex }) => {
         const isHero = !isEnemyPad
         const isValidTarget = targetType && (
@@ -293,7 +315,7 @@ function FormationPad({
           <button
             type="button"
             key={unit.id}
-            className={`pad-unit ${isEnemyPad ? 'foe-unit' : 'ally-unit'} ${unit.isBoss ? 'boss-unit' : ''} ${unit.hp <= 0 ? 'fallen' : ''} ${roleMatch ? 'row-bonus' : ''} ${activeHeroId === unit.id || selectedEnemyId === unit.id ? 'selected' : ''} ${isValidTarget ? 'target-valid' : ''} ${actingUnitId === unit.id ? 'turn-acting' : ''} ${animatingUnitId === unit.id ? 'animating' : ''} ${vfxEvent?.targetIds.includes(unit.id) ? `vfx-target vfx-${vfxEvent.intensity} vfx-mode-${vfxEvent.targetMode}` : ''} ${vfxEvent?.actorId === unit.id ? `attacking attack-${vfxEvent.intensity} attack-mode-${vfxEvent.targetMode}` : ''}`}
+            className={`pad-unit ${isEnemyPad ? 'foe-unit' : 'ally-unit'} ${unit.isBoss ? 'boss-unit' : ''} ${unit.isColossal ? 'colossal-unit' : ''} ${unit.hp <= 0 ? 'fallen' : ''} ${unit.statuses.some((status) => status.kind === 'Freeze') ? 'frozen-unit' : ''} ${roleMatch ? 'row-bonus' : ''} ${activeHeroId === unit.id || selectedEnemyId === unit.id ? 'selected' : ''} ${isValidTarget ? 'target-valid' : ''} ${actingUnitId === unit.id ? 'turn-acting' : ''} ${animatingUnitId === unit.id ? 'animating' : ''} ${vfxEvent?.targetIds.includes(unit.id) ? `vfx-target vfx-${vfxEvent.intensity} vfx-mode-${vfxEvent.targetMode}` : ''} ${vfxEvent?.actorId === unit.id ? `attacking attack-${vfxEvent.intensity} attack-mode-${vfxEvent.targetMode}` : ''}`}
             style={{ left: `${x}%`, top: `${y}%`, zIndex, '--dash-x': `${(vfxEvent?.destination.x ?? x) - x}cqi`, '--dash-y': `${(vfxEvent?.destination.y ?? y) - y}cqb`, '--unit-accent': asset?.accent ?? '#C9A45C', '--foot-offset': `${asset?.footOffsetPx ?? 4}px`, '--sprite-scale': asset?.scale ?? 1 } as React.CSSProperties}
             onClick={(event) => { event.stopPropagation(); onSelect(unit) }}
             title={`${unit.name} · ${unit.role} · ${unit.hp}/${unit.maxHp} HP`}
@@ -301,8 +323,7 @@ function FormationPad({
           >
             <span className={`pad-circle-marker circle-${row.toLowerCase()} ${roleMatch ? 'buffed' : ''}`} />
             <span className="sprite-anchor"><UnitSprite unit={unit} compact facing={isEnemyPad ? 'left' : 'right'} /></span>
-            <span className="pad-unit-name">{unit.name}</span>
-            <span className="pad-unit-health">{unit.hp}</span>
+            <span className="pad-unit-nameplate"><b title={unit.name}>{unit.name}</b><span>{unit.hp}/{unit.maxHp}</span><HealthBar unit={unit} /></span>
             {vfxEvent?.targetIds.includes(unit.id) && <BattleVfxOverlay key={`${vfxEvent.id}-${unit.id}`} attribute={vfxEvent.attribute} intensity={vfxEvent.intensity} targetMode={vfxEvent.targetMode} />}
             {floating.filter((text) => text.targetId === unit.id).map((text) => <span key={text.id} className={`float-number ${text.kind}`}>{text.text}</span>)}
           </button>
@@ -326,6 +347,7 @@ function App() {
   const [selectedStarterId, setSelectedStarterId] = useState(heroes[0].id)
   const [starterDetailsOpen, setStarterDetailsOpen] = useState(true)
   const [victory, setVictory] = useState(false)
+  const [defeat, setDefeat] = useState(false)
   const [stageNumber, setStageNumber] = useState(saved?.stageNumber ?? 1)
   const [gold, setGold] = useState(saved?.gold ?? 60)
   const [roster, setRoster] = useState<Unit[]>(saved?.roster ?? [])
@@ -333,6 +355,7 @@ function App() {
   const [enemies, setEnemies] = useState<Unit[]>([])
   const [items, setItems] = useState<Record<ItemId, number>>(saved?.items ?? initialItems)
   const [turns, setTurns] = useState(saved?.turns ?? 0)
+  const [enemiesDefeated, setEnemiesDefeated] = useState(saved?.enemiesDefeated ?? 0)
   const [enemyTurnIndex, setEnemyTurnIndex] = useState(0)
   const [activeHeroId, setActiveHeroId] = useState<string | null>(null)
   const [attackMode, setAttackMode] = useState(false)
@@ -352,6 +375,7 @@ function App() {
   const [impact, setImpact] = useState<string | null>(null)
   const [vfxEvent, setVfxEvent] = useState<VfxEvent | null>(null)
   const vfxSequence = useRef(0)
+  const floatingSequence = useRef(0)
   const [animatingUnitId, setAnimatingUnitId] = useState<string | null>(null)
   const [actingUnitId, setActingUnitId] = useState<string | null>(null)
   const [isResolving, setIsResolving] = useState(false)
@@ -376,10 +400,10 @@ function App() {
 
   useEffect(() => {
     if (started && roster.length) {
-      const next = { stageNumber, gold, roster, teamIds, items, turns, enemies, hostagesLeft, hostageOfferIds, enemyTurnIndex, sold }
+      const next = { stageNumber, gold, roster, teamIds, items, turns, enemies, hostagesLeft, hostageOfferIds, enemyTurnIndex, sold, enemiesDefeated }
       localStorage.setItem('mythic-dungeon-save', JSON.stringify(next))
     }
-  }, [started, stageNumber, gold, roster, teamIds, items, turns, enemies, hostagesLeft, hostageOfferIds, enemyTurnIndex, sold])
+  }, [started, stageNumber, gold, roster, teamIds, items, turns, enemies, hostagesLeft, hostageOfferIds, enemyTurnIndex, sold, enemiesDefeated])
 
   useEffect(() => {
     if (!floating.length) return
@@ -410,6 +434,8 @@ function App() {
   }, [cutIn])
 
   const addFloats = (texts: FloatingText[]) => setFloating((current) => [...current, ...texts])
+  const makeFloat = (targetId: string, text: string, kind: FloatingText['kind']): FloatingText =>
+    ({ id: ++floatingSequence.current, targetId, text, kind })
   const setMessage = (message: string) => setLog(message)
   const updateRoster = (id: string, updater: (unit: Unit) => Unit) =>
     setRoster((current) => current.map((unit) => unit.id === id ? updater(unit) : unit))
@@ -421,6 +447,7 @@ function App() {
     setStageNumber(1)
     setGold(60)
     setTurns(0)
+    setEnemiesDefeated(0)
     setEnemyTurnIndex(0)
     setItems(initialItems)
     setEnemies(randomEnemyGroup(stages[0]))
@@ -428,16 +455,47 @@ function App() {
     setHostageOfferIds([])
     setStarted(true)
     setVictory(false)
+    setDefeat(false)
     setActiveHeroId(starterId)
     setLog(`Your party enters the ${stages[0].areaName}.`)
   }
 
   const applyStatus = (target: Unit, effect?: Skill['effect'], duration = 2) =>
-    effect ? (Array.isArray(effect) ? effect : [effect]).reduce((unit, kind) => addStatus(unit, kind, duration), target) : target
+    effect ? (Array.isArray(effect) ? effect : [effect]).reduce((unit, kind) => addStatus(unit, kind, kind === 'Freeze' ? 1 : duration), target) : target
 
   const executePlayerSkill = (skillIndex: number, targetId?: string) => {
     if (!activeHero || activeHero.hp <= 0) return
     const actor = roster.find((unit) => unit.id === activeHero.id) ?? activeHero
+    if (actor.statuses.some((status) => status.kind === 'Freeze')) {
+      const thawed = tickStatuses(actor)
+      const skippedRoster = roster.map((unit) => unit.id === actor.id ? thawed.unit : unit)
+      const substitution = replaceFallenWithBench(skippedRoster, teamIds)
+      setRoster(substitution.roster)
+      setTeamIds(substitution.teamIds)
+      if (thawed.damage) addFloats([makeFloat(actor.id, `-${thawed.damage}`, 'damage')])
+      setMessage(substitution.substitutions.length
+        ? `${actor.name} is frozen solid! ${substitution.substitutions.map(({ fallen, replacement }) => `${fallen} fell; ${replacement} steps into the fight.`).join(' ')}`
+        : `${actor.name} is frozen solid! Their turn is skipped.`)
+      setSelectedSkill(null)
+      setAttackMode(false)
+      setTurns((value) => value + 1)
+      setIsResolving(true)
+      if (substitution.roster.every((unit) => unit.hp <= 0)) {
+        setStarted(false)
+        setDefeat(true)
+        setSaved(null)
+        localStorage.removeItem('mythic-dungeon-save')
+        return
+      }
+      const action = enemyTurn(enemies, substitution.roster, substitution.teamIds)
+      window.setTimeout(() => {
+        setIsResolving(false)
+        const queue = sortBySpeed(action.teamIds.map((id) => action.roster.find((unit) => unit.id === id))
+          .filter((unit): unit is Unit => unit !== undefined && unit.hp > 0))
+        setActiveHeroId(queue[0]?.id ?? null)
+      }, action.duration)
+      return
+    }
     const skill = actor.skills[skillIndex]
     if (skillIndex > 0 && actor.gauge[skillIndex - 1] < skill.cost) {
       setMessage(`${skill.name} needs ${skill.cost} charges.`)
@@ -455,23 +513,35 @@ function App() {
     const bonus = formationBonus(actor)
     const skillDuration = actor.id === 'ember' && (skill.effect === 'Burn' || (Array.isArray(skill.effect) && skill.effect.includes('Burn'))) ? 3 : 2
     const lyraBonus = actor.id === 'lyra' && skill.attribute === 'Ice' && !actor.passiveUsed && skill.type !== 'heal'
+    const applySkillEffects = (target: Unit) => {
+      let updated = applyStatus(target, skill.effect, skillDuration)
+      if (skill.cleanseDebuffs) updated = { ...updated, statuses: updated.statuses.filter((status) =>
+        !['Burn', 'Curse', 'Freeze', 'DEF Down', 'Taunt'].includes(status.kind),
+      ) }
+      if (skill.gaugeDrain && enemies.some((enemy) => enemy.id === target.id)) {
+        const drained = Math.min(updated.gauge[0], skill.gaugeDrain)
+        updated = { ...updated, gauge: [Math.max(0, updated.gauge[0] - skill.gaugeDrain), updated.gauge[1], updated.gauge[2]] }
+        texts.push(makeFloat(target.id, `-${drained} ULT`, 'status'))
+      }
+      return updated
+    }
 
     targets.forEach((target) => {
       if (skill.type === 'heal') {
         const healingReduction = target.statuses.some((status) => status.kind === 'Curse') ? 0.5 : 1
         const amount = Math.max(0, Math.round(target.maxHp * skill.power / 100 * (1 + bonus.heal) * healingReduction))
         const healed = Math.min(target.maxHp, target.hp + amount)
-        const nextTarget = applyStatus({ ...target, hp: healed }, skill.effect, skillDuration)
+        const nextTarget = applySkillEffects({ ...target, hp: healed })
         if (party.some((unit) => unit.id === target.id)) updatedRoster = updatedRoster.map((unit) => unit.id === target.id ? nextTarget : unit)
         else updatedEnemies = updatedEnemies.map((unit) => unit.id === target.id ? nextTarget : unit)
-        texts.push({ id: Date.now() + Math.random(), targetId: target.id, text: `+${healed - target.hp}`, kind: 'heal' })
+        texts.push(makeFloat(target.id, `+${healed - target.hp}`, 'heal'))
       } else {
         const passiveSkill = lyraBonus ? { ...skill, power: Math.round(skill.power * 1.25) } : skill
         const damage = calculateDamage(actor, target, passiveSkill, skill.type === 'physical' ? bonus.phys : bonus.mag)
-        const nextTarget = damage === 0 ? target : applyStatus({ ...target, hp: Math.max(0, target.hp - damage) }, skill.effect, skillDuration)
+        const nextTarget = damage === 0 ? target : applySkillEffects({ ...target, hp: Math.max(0, target.hp - damage) })
         if (party.some((unit) => unit.id === target.id)) updatedRoster = updatedRoster.map((unit) => unit.id === target.id ? nextTarget : unit)
         else updatedEnemies = updatedEnemies.map((unit) => unit.id === target.id ? nextTarget : unit)
-        texts.push({ id: Date.now() + Math.random(), targetId: target.id, text: damage === 0 ? 'DODGE' : `-${damage}`, kind: damage === 0 ? 'status' : 'damage' })
+        texts.push(makeFloat(target.id, damage === 0 ? 'DODGE' : `-${damage}`, damage === 0 ? 'status' : 'damage'))
       }
     })
 
@@ -479,7 +549,13 @@ function App() {
     const charged = chargeGauge(actorBeforeCharge, skillIndex)
     const actorAfterCharge = { ...charged, passiveUsed: actor.passiveUsed || lyraBonus }
     const actorAfterSkill = skill.selfEffect ? addStatus(actorAfterCharge, skill.selfEffect) : actorAfterCharge
-    updatedRoster = updatedRoster.map((unit) => unit.id === actor.id ? actorAfterSkill : unit)
+    const actorTick = tickStatuses(actorAfterSkill)
+    updatedRoster = updatedRoster.map((unit) => unit.id === actor.id ? actorTick.unit : unit)
+    if (actorTick.damage) texts.push(makeFloat(actor.id, `-${actorTick.damage}`, 'damage'))
+    const substitution = replaceFallenWithBench(updatedRoster, teamIds)
+    updatedRoster = substitution.roster
+    const updatedTeamIds = substitution.teamIds
+    const defeatedCount = enemies.filter((unit) => unit.hp > 0).length - updatedEnemies.filter((unit) => unit.hp > 0).length
     const dramatic = skillIndex === 3 && !actor.isMinion
     const aoe = skill.target === 'all-enemies' || skill.target === 'all-allies'
     const targetSide = skill.target === 'ally' || skill.target === 'all-allies' ? 'heroes' : 'enemies'
@@ -520,9 +596,14 @@ function App() {
       setImpact(skill.attribute.toLowerCase())
       window.setTimeout(() => {
         setRoster(updatedRoster)
+        setTeamIds(updatedTeamIds)
         setEnemies(updatedEnemies)
         setTurns((value) => value + 1)
+        if (defeatedCount > 0) setEnemiesDefeated((count) => count + defeatedCount)
         addFloats(texts)
+        if (substitution.substitutions.length) {
+          setLog(substitution.substitutions.map(({ fallen, replacement }) => `${fallen} fell! ${replacement} steps into the fight!`).join(' '))
+        }
       }, 380)
       window.setTimeout(() => setImpact(null), 380 + hitHold)
       window.setTimeout(() => setVfxEvent((current) => current?.id === vfx.id ? null : current), actionDuration)
@@ -535,134 +616,159 @@ function App() {
       window.setTimeout(() => finishBattle(updatedEnemies, updatedRoster), prelude + actionDuration)
       return
     }
-    const queue = sortBySpeed(updatedRoster.filter((unit) => teamIds.includes(unit.id) && unit.hp > 0))
-    const currentIndex = queue.findIndex((unit) => unit.id === actor.id)
-    const nextActor = queue[(currentIndex + 1) % Math.max(queue.length, 1)]
+    if (updatedRoster.every((unit) => unit.hp <= 0)) {
+      window.setTimeout(() => {
+        setRoster(updatedRoster)
+        setTeamIds(updatedTeamIds)
+        setStarted(false)
+        setDefeat(true)
+        setSaved(null)
+        localStorage.removeItem('mythic-dungeon-save')
+      }, prelude + actionDuration)
+      return
+    }
     window.setTimeout(() => {
-      const enemyActionDuration = enemyTurn(updatedEnemies, updatedRoster)
+      const enemyAction = enemyTurn(updatedEnemies, updatedRoster, updatedTeamIds)
       window.setTimeout(() => {
         setIsResolving(false)
-        if (nextActor) setActiveHeroId(nextActor.id)
-      }, enemyActionDuration)
+        const queue = sortBySpeed(enemyAction.teamIds.map((id) => enemyAction.roster.find((unit) => unit.id === id))
+          .filter((unit): unit is Unit => unit !== undefined && unit.hp > 0))
+        const currentIndex = queue.findIndex((unit) => unit.id === actor.id)
+        setActiveHeroId(queue[(currentIndex + 1) % Math.max(queue.length, 1)]?.id ?? queue[0]?.id ?? null)
+      }, enemyAction.duration)
     }, prelude + actionDuration)
   }
 
-  const enemyTurn = (currentEnemies: Unit[], currentRoster: Unit[]) => {
+  const enemyTurn = (currentEnemies: Unit[], currentRoster: Unit[], currentTeamIds = teamIds) => {
     const aliveEnemies = currentEnemies.filter((unit) => unit.hp > 0)
-    if (!aliveEnemies.length) return 0
+    if (!aliveEnemies.length) return { duration: 0, roster: currentRoster, teamIds: currentTeamIds, defeated: false }
     const actingEnemy = sortBySpeed(aliveEnemies)[enemyTurnIndex % aliveEnemies.length]
     setEnemyTurnIndex((current) => current + 1)
     let partyAfter = [...currentRoster]
     let enemyAfter = [...currentEnemies]
     const texts: FloatingText[] = []
-    let actionDuration = 0
-    ;[actingEnemy].forEach((enemy) => {
-      const targets = teamIds.map((id) => partyAfter.find((unit) => unit.id === id)).filter((unit): unit is Unit => unit !== undefined && unit.hp > 0)
-      if (!targets.length) return
-      const gauge = [enemy.gauge[0] + 1, enemy.gauge[1], enemy.gauge[2]] as Unit['gauge']
-      const useUltimate = gauge[0] >= 4
-      const isUmbral = enemy.id.startsWith('boss-eclipse-seraph') && Boolean(enemy.passiveUsed)
-      const enemySkill = useUltimate ? enemy.skills[3] : isUmbral
-        ? { ...enemy.skills[0], name: 'Eclipse Brand · Umbral', power: 205, attribute: 'Shadow' as const, type: 'physical' as const, target: 'enemy' as const, description: 'Umbral stance: a Shadow strike burns a single target.', effect: 'Burn' as const }
-        : enemy.skills[0]
-      const targetId = enemySkill.target === 'enemy' ? getTargetId(targets) : undefined
-      const enemyTeamHeal = enemySkill.type === 'heal' && enemySkill.target === 'all-allies'
-      const targetsForAction = enemyTeamHeal
-        ? enemyAfter.filter((unit) => unit.hp > 0)
-        : enemySkill.target === 'all-enemies' ? targets : targets.filter((unit) => unit.id === targetId)
-      targetsForAction.forEach((target) => {
-        if (enemySkill.type === 'heal') {
-          const healingReduction = target.statuses.some((status) => status.kind === 'Curse') ? 0.5 : 1
-          const heal = Math.round(target.maxHp * Math.max(enemySkill.power, 10) / 100 * healingReduction)
-          if (enemyTeamHeal) enemyAfter = enemyAfter.map((unit) => unit.id === target.id ? { ...unit, hp: Math.min(unit.maxHp, unit.hp + heal) } : unit)
-          else partyAfter = partyAfter.map((unit) => unit.id === target.id ? { ...unit, hp: Math.min(unit.maxHp, unit.hp + heal) } : unit)
-          texts.push({ id: Date.now() + Math.random(), targetId: target.id, text: `+${heal}`, kind: 'heal' })
-        } else {
-          const broodCount = enemy.id.startsWith('boss-bone-dragon')
-            ? enemyAfter.filter((unit) => unit.hp > 0 && unit.id.startsWith('minidragon-')).length
-            : 0
-          const attacker = broodCount
-            ? { ...enemy, physAtk: Math.round(enemy.physAtk * (1 + broodCount * 0.12)), magAtk: Math.round(enemy.magAtk * (1 + broodCount * 0.12)) }
-            : enemy
-          const damage = calculateDamage(attacker, target, enemySkill)
-          const wounded = damage === 0 ? target : applyStatus({ ...target, hp: Math.max(0, target.hp - damage) }, enemySkill.effect)
-          partyAfter = partyAfter.map((unit) => unit.id === target.id ? wounded : unit)
-          texts.push({ id: Date.now() + Math.random(), targetId: target.id, text: damage ? `-${damage}` : 'DODGE', kind: damage ? 'damage' : 'status' })
-        }
-      })
-      enemyAfter = enemyAfter.map((unit) => {
-        if (unit.id !== enemy.id) return unit
-        const acted = {
-          ...unit,
-          gauge: useUltimate ? [0, gauge[1], gauge[2]] as Unit['gauge'] : gauge,
-          passiveUsed: unit.id.startsWith('boss-eclipse-seraph') ? !unit.passiveUsed : unit.passiveUsed,
-        }
-        return enemySkill.selfEffect ? addStatus(acted, enemySkill.selfEffect) : acted
-      })
-      const dramatic = useUltimate && !enemy.isMinion
-      const aoe = enemySkill.target === 'all-enemies' || enemySkill.target === 'all-allies'
-      const targetSide = enemySkill.target === 'all-allies' ? 'enemies' : 'heroes'
-      const destination = enemySkill.target === 'all-enemies'
-        ? { x: 50, y: 52 }
-        : enemySkill.target === 'all-allies'
-          ? { x: 72, y: 52 }
-          : unitBattlePosition(targetsForAction[0] ?? targets[0], targetSide === 'heroes' ? targets : currentEnemies, targetSide)
-      const enemyVfx: VfxEvent = {
-        id: ++vfxSequence.current,
-        actorId: enemy.id,
-        targetSide,
-        attribute: enemySkill.attribute,
-        intensity: enemySkill.type === 'heal' ? 'heal' as const : dramatic ? 'ultimate' as const : 'basic' as const,
-        targetIds: targetsForAction.map((target) => target.id),
-        targetMode: aoe ? 'aoe' as const : 'single' as const,
-        destination,
+
+    if (actingEnemy.statuses.some((status) => status.kind === 'Freeze')) {
+      const thawed = tickStatuses(actingEnemy)
+      enemyAfter = enemyAfter.map((unit) => unit.id === actingEnemy.id ? thawed.unit : unit)
+      if (thawed.damage) texts.push(makeFloat(actingEnemy.id, `-${thawed.damage}`, 'damage'))
+      setEnemies(enemyAfter)
+      setLog(`${actingEnemy.name} is frozen solid! Its turn is skipped.`)
+      const duration = 660
+      if (enemyAfter.every((unit) => unit.hp <= 0)) window.setTimeout(() => finishBattle(enemyAfter, partyAfter), duration)
+      return { duration, roster: partyAfter, teamIds: currentTeamIds, defeated: false }
+    }
+
+    const targets = currentTeamIds.map((id) => partyAfter.find((unit) => unit.id === id))
+      .filter((unit): unit is Unit => unit !== undefined && unit.hp > 0)
+    if (!targets.length) return { duration: 0, roster: partyAfter, teamIds: currentTeamIds, defeated: false }
+
+    const gauge = [actingEnemy.gauge[0] + 1, actingEnemy.gauge[1], actingEnemy.gauge[2]] as Unit['gauge']
+    const useUltimate = gauge[0] >= 4
+    const isUmbral = actingEnemy.id.startsWith('boss-eclipse-seraph') && Boolean(actingEnemy.passiveUsed)
+    const enemySkill = useUltimate ? actingEnemy.skills[3] : isUmbral
+      ? { ...actingEnemy.skills[0], name: 'Eclipse Brand · Umbral', power: 205, attribute: 'Shadow' as const, type: 'physical' as const, target: 'enemy' as const, description: 'Deals 205% Phys ATK to 1 enemy. Inflicts Burn (2t) on 1 enemy.', effect: 'Burn' as const }
+      : actingEnemy.skills[0]
+    const finalExecution = actingEnemy.isColossal && useUltimate
+    const targetId = finalExecution
+      ? [...targets].sort((a, b) => (a.row === 'Front' ? 0 : 1) - (b.row === 'Front' ? 0 : 1))
+        .find((unit) => unit.row === 'Front')?.id ?? targets.find((unit) => unit.row === 'Back')?.id
+      : enemySkill.target === 'enemy' ? getTargetId(targets) : undefined
+    const enemyTeamHeal = enemySkill.type === 'heal' && enemySkill.target === 'all-allies'
+    const targetsForAction = enemyTeamHeal
+      ? enemyAfter.filter((unit) => unit.hp > 0)
+      : enemySkill.target === 'all-enemies' ? targets : targets.filter((unit) => unit.id === targetId)
+
+    targetsForAction.forEach((target) => {
+      if (enemySkill.type === 'heal') {
+        const healingReduction = target.statuses.some((status) => status.kind === 'Curse') ? 0.5 : 1
+        const heal = Math.round(target.maxHp * Math.max(enemySkill.power, 10) / 100 * healingReduction)
+        if (enemyTeamHeal) enemyAfter = enemyAfter.map((unit) => unit.id === target.id ? { ...unit, hp: Math.min(unit.maxHp, unit.hp + heal) } : unit)
+        else partyAfter = partyAfter.map((unit) => unit.id === target.id ? { ...unit, hp: Math.min(unit.maxHp, unit.hp + heal) } : unit)
+        texts.push(makeFloat(target.id, `+${heal}`, 'heal'))
+      } else {
+        const damage = calculateDamage(actingEnemy, target, enemySkill)
+        const wounded = damage === 0 ? target : applyStatus({ ...target, hp: Math.max(0, target.hp - damage) }, enemySkill.effect)
+        partyAfter = partyAfter.map((unit) => unit.id === target.id ? wounded : unit)
+        texts.push(makeFloat(target.id, damage ? `-${damage}` : 'DODGE', damage ? 'damage' : 'status'))
       }
-      const prelude = dramatic ? 700 : 280
-      const hitHold = dramatic ? 580 : 420
-      actionDuration = prelude + 380 + hitHold + 320 + 380
-      setActingUnitId(enemy.id)
-      if (dramatic) setCutIn(enemy)
-      window.setTimeout(() => {
-        setAnimatingUnitId(enemy.id)
-        setVfxEvent(enemyVfx)
-        setImpact(enemySkill.attribute.toLowerCase())
-        window.setTimeout(() => {
-          setRoster(partyAfter)
-          setEnemies(enemyAfter)
-          addFloats([...texts])
-        }, 380)
-        window.setTimeout(() => setImpact(null), 380 + hitHold)
-        window.setTimeout(() => setVfxEvent((current) => current?.id === enemyVfx.id ? null : current), actionDuration - prelude)
-      }, prelude)
-      window.setTimeout(() => {
-        setAnimatingUnitId(null)
-        setActingUnitId(null)
-      }, actionDuration)
-      setLog(useUltimate
-        ? `${enemy.name} unleashes ${enemySkill.name}!`
-        : gauge[0] === 3 ? `${enemy.name} charges ${enemy.skills[3].name}!` : `${enemy.name} used ${enemySkill.name}.`)
     })
-    partyAfter = partyAfter.map((unit) => {
-      const ticked = tickStatuses(unit)
-      if (ticked.damage) texts.push({ id: Date.now() + Math.random(), targetId: unit.id, text: `-${ticked.damage}`, kind: 'damage' })
-      return ticked.unit
-    })
+
     enemyAfter = enemyAfter.map((unit) => {
-      const ticked = tickStatuses(unit)
-      if (ticked.damage) texts.push({ id: Date.now() + Math.random(), targetId: unit.id, text: `-${ticked.damage}`, kind: 'damage' })
-      return ticked.unit
+      if (unit.id !== actingEnemy.id) return unit
+      const acted = {
+        ...unit,
+        gauge: useUltimate ? [0, gauge[1], gauge[2]] as Unit['gauge'] : gauge,
+        passiveUsed: unit.id.startsWith('boss-eclipse-seraph') ? !unit.passiveUsed : unit.passiveUsed,
+      }
+      return enemySkill.selfEffect ? addStatus(acted, enemySkill.selfEffect) : acted
     })
-    if (enemyAfter.every((unit) => unit.hp <= 0)) {
-      window.setTimeout(() => finishBattle(enemyAfter, partyAfter), actionDuration)
-      return actionDuration
+    const actorTick = tickStatuses(enemyAfter.find((unit) => unit.id === actingEnemy.id) ?? actingEnemy)
+    enemyAfter = enemyAfter.map((unit) => unit.id === actingEnemy.id ? actorTick.unit : unit)
+    if (actorTick.damage) texts.push(makeFloat(actingEnemy.id, `-${actorTick.damage}`, 'damage'))
+
+    const substitutions = replaceFallenWithBench(partyAfter, currentTeamIds)
+    partyAfter = substitutions.roster
+    const updatedTeamIds = substitutions.teamIds
+    const dramatic = useUltimate && !actingEnemy.isMinion
+    const aoe = enemySkill.target === 'all-enemies' || enemySkill.target === 'all-allies'
+    const targetSide = enemySkill.target === 'all-allies' ? 'enemies' : 'heroes'
+    const destination = enemySkill.target === 'all-enemies'
+      ? { x: 50, y: 52 }
+      : enemySkill.target === 'all-allies'
+        ? { x: 72, y: 52 }
+        : unitBattlePosition(targetsForAction[0] ?? targets[0], targetSide === 'heroes' ? targets : currentEnemies, targetSide)
+    const enemyVfx: VfxEvent = {
+      id: ++vfxSequence.current,
+      actorId: actingEnemy.id,
+      targetSide,
+      attribute: enemySkill.attribute,
+      intensity: enemySkill.type === 'heal' ? 'heal' : dramatic ? 'ultimate' : 'basic',
+      targetIds: targetsForAction.map((target) => target.id),
+      targetMode: aoe ? 'aoe' : 'single',
+      destination,
     }
-    if (!partyAfter.some((unit) => teamIds.includes(unit.id) && unit.hp > 0)) {
-      setLog('Your party is exhausted. Resting at camp to rise again.')
-      partyAfter = partyAfter.map((unit) => teamIds.includes(unit.id) && unit.hp <= 0
-        ? { ...unit, hp: Math.round(unit.maxHp * 0.3) }
-        : unit)
+    const prelude = dramatic ? 700 : 280
+    const hitHold = dramatic ? 580 : 420
+    const duration = prelude + 380 + hitHold + 320 + 380
+    const defeatedCount = currentEnemies.filter((unit) => unit.hp > 0).length - enemyAfter.filter((unit) => unit.hp > 0).length
+    const defeated = partyAfter.every((unit) => unit.hp <= 0) && enemyAfter.some((unit) => unit.hp > 0)
+    setActingUnitId(actingEnemy.id)
+    if (dramatic) setCutIn(actingEnemy)
+    window.setTimeout(() => {
+      setAnimatingUnitId(actingEnemy.id)
+      setVfxEvent(enemyVfx)
+      setImpact(enemySkill.attribute.toLowerCase())
+      window.setTimeout(() => {
+        setRoster(partyAfter)
+        setTeamIds(updatedTeamIds)
+        setEnemies(enemyAfter)
+        if (defeatedCount > 0) setEnemiesDefeated((count) => count + defeatedCount)
+        addFloats(texts)
+        if (substitutions.substitutions.length) {
+          setLog(substitutions.substitutions.map(({ fallen, replacement }) => `${fallen} fell! ${replacement} steps into the fight!`).join(' '))
+        }
+      }, 380)
+      window.setTimeout(() => setImpact(null), 380 + hitHold)
+      window.setTimeout(() => setVfxEvent((current) => current?.id === enemyVfx.id ? null : current), duration - prelude)
+    }, prelude)
+    window.setTimeout(() => {
+      setAnimatingUnitId(null)
+      setActingUnitId(null)
+    }, duration)
+    if (enemyAfter.every((unit) => unit.hp <= 0)) window.setTimeout(() => finishBattle(enemyAfter, partyAfter), duration)
+    if (defeated) {
+      window.setTimeout(() => {
+        setStarted(false)
+        setDefeat(true)
+        setSaved(null)
+        localStorage.removeItem('mythic-dungeon-save')
+      }, duration)
     }
-    return actionDuration
+    if (!dramatic) setLog(useUltimate
+      ? `${actingEnemy.name} unleashes ${enemySkill.name}!`
+      : gauge[0] === 3 ? `${actingEnemy.name} charges ${actingEnemy.skills[3].name}!` : `${actingEnemy.name} used ${enemySkill.name}.`)
+    return { duration, roster: partyAfter, teamIds: updatedTeamIds, defeated }
   }
 
   const finishBattle = (defeated = enemies, endingRoster = roster) => {
@@ -680,9 +786,10 @@ function App() {
     setRoster(afterVictory)
     setAttackMode(false)
     setSelectedSkill(null)
-    if (stageNumber === 15) {
+    if (stageNumber === 16) {
       setStarted(false)
       setVictory(true)
+      setDefeat(false)
       setSaved(null)
       localStorage.removeItem('mythic-dungeon-save')
       setModal(null)
@@ -926,6 +1033,8 @@ function App() {
     setGold(saved.gold)
     setItems(saved.items)
     setTurns(saved.turns)
+    setEnemiesDefeated(saved.enemiesDefeated ?? 0)
+    setDefeat(false)
     setHostagesLeft(saved.hostagesLeft ?? 0)
     setEnemyTurnIndex(saved.enemyTurnIndex ?? 0)
     setSold(saved.sold ?? [])
@@ -952,6 +1061,38 @@ function App() {
     setTeamTab('squad')
     setSelectedTeamSwapId(null)
     setModal('team')
+  }
+
+  if (!started && defeat) {
+    return (
+      <main className="victory-screen defeat-screen">
+        <div className="defeat-content">
+          <div className="dialog-kicker">DESCENT ENDED</div>
+          <h1>FALLEN IN<br /><em>THE DUNGEON</em></h1>
+          <p>Your companions fought as far as they could. The dungeon keeps its silence.</p>
+          <div className="victory-summary">
+            <span>Stage reached · {stageNumber} / 16</span>
+            <span>Turns survived · {turns}</span>
+            <span>Enemies defeated · {enemiesDefeated}</span>
+          </div>
+          <button className="gold-button" onClick={() => {
+            setStarted(false)
+            setDefeat(false)
+            setVictory(false)
+            setStageNumber(1)
+            setGold(60)
+            setTurns(0)
+            setEnemiesDefeated(0)
+            setRoster([])
+            setTeamIds([])
+            setEnemies([])
+            setActiveHeroId(null)
+            setSaved(null)
+            localStorage.removeItem('mythic-dungeon-save')
+          }}>Return to Start <ChevronRight size={16} /></button>
+        </div>
+      </main>
+    )
   }
 
   if (!started && !victory) {
@@ -1009,7 +1150,7 @@ function App() {
               : <button className="begin-descent-button" onClick={() => beginRun(selectedStarterId)}>Begin Descent <ChevronRight size={20} /></button>}
           </div>
         </section>
-        <footer className="title-footer"><span>SIX DUNGEON AREAS · FIFTEEN STAGES · ONE UNFORGETTABLE DAY</span><span>✦ A tale made just for you ✦</span></footer>
+        <footer className="title-footer"><span>EIGHT DUNGEON AREAS · SIXTEEN STAGES · ONE UNFORGETTABLE DAY</span><span>✦ A tale made just for you ✦</span></footer>
       </main>
     )
   }
@@ -1025,7 +1166,7 @@ function App() {
           <div className="victory-summary"><span><Swords size={16} /> {turns} turns</span><span><UsersRound size={16} /> {party.length} companions</span><span><Coins size={16} /> {gold} gold earned</span></div>
           <div className="victory-party">{party.map((unit) => <div key={unit.id}><Avatar unit={unit} compact /><b>{unit.name}</b></div>)}</div>
           <p className="victory-signature">{BIRTHDAY_CONFIG.fromSignature}</p>
-          <button className="gold-button" onClick={() => { setStarted(false); setVictory(false); setStageNumber(1); setSaved(null); setRoster([]); setTeamIds([]); setLog('') }}>Begin another legend <ChevronRight size={16} /></button>
+          <button className="gold-button" onClick={() => { setStarted(false); setVictory(false); setDefeat(false); setStageNumber(1); setSaved(null); setRoster([]); setTeamIds([]); setLog('') }}>Begin another legend <ChevronRight size={16} /></button>
         </div>
       </main>
     )
@@ -1041,10 +1182,10 @@ function App() {
       <header className="topbar">
         <div className="game-brand"><span className="brand-mark"><Sparkles size={15} /></span><span>MYTHIC <b>DUNGEON</b></span></div>
         <section className="stage-progress" aria-label="Dungeon stage progress">
-          <div className="stage-segment-heading"><span>DESCENT TRACK</span><b>STAGE {stage.number} / 15</b><i>{stage.areaName}</i></div>
+          <div className="stage-segment-heading"><span>DESCENT TRACK</span><b>STAGE {stage.number} / 16</b><i>{stage.areaName}</i></div>
           <div className="stage-nodes">{segmentStages.map((entry) => (
               <span key={entry.number} aria-label={`Stage ${entry.number}: ${entry.title} · ${entry.kind}`} title={`${entry.number}. ${entry.title}`}
-                className={`stage-node ${entry.kind} ${entry.number === stageNumber ? 'current' : ''} ${entry.number < stageNumber ? 'complete' : ''}`}>
+                className={`stage-node ${entry.kind} ${entry.number === 16 ? 'final-boss-node' : ''} ${entry.number === stageNumber ? 'current' : ''} ${entry.number < stageNumber ? 'complete' : ''}`}>
                 <span>{entry.kind === 'boss' ? '♛' : entry.kind === 'camp' ? '✦' : entry.number < stageNumber ? '✓' : entry.number}</span>
               </span>
           ))}</div>
@@ -1081,7 +1222,7 @@ function App() {
           const skill = activeHero.skills[selectedSkill]
           if (skill.target === 'all-enemies' || skill.target === 'all-allies') executePlayerSkill(selectedSkill)
         }}>
-          <div className="arena-topline"><span><i /> {stage.areaName}</span><b>STAGE {String(stage.number).padStart(2, '0')} <small>/ 15</small></b></div>
+          <div className="arena-topline"><span><i /> {stage.areaName}</span><b>STAGE {String(stage.number).padStart(2, '0')} <small>/ 16</small></b></div>
           <div className="battle-callout" role="status" aria-live="polite">{log}</div>
           <div className="arena-location"><span>✦</span><h2>{stage.title}</h2><p>{stage.description}</p></div>
           <div className="battle-pads">
@@ -1142,7 +1283,8 @@ function App() {
             <div className="detail-hero"><Avatar unit={detailsUnit} facing={enemies.some((unit) => unit.id === detailsUnit.id) ? 'left' : 'right'} /><div><AttributeBadge attributes={detailsUnit.attributes} /><h2>{detailsUnit.name}</h2><span>{detailsUnit.role}{detailsUnit.isBoss ? ' · DUNGEON BOSS' : ''}</span></div></div>
             <div className="detail-stats"><span><Heart size={14} /> HP <b>{detailsUnit.hp}/{detailsUnit.maxHp}</b></span><span><Swords size={14} /> Phys ATK <b>{detailsUnit.physAtk}</b></span><span><Sparkles size={14} /> Mag ATK <b>{detailsUnit.magAtk}</b></span><span><Shield size={14} /> DEF <b>{detailsUnit.def}</b></span><span><ChevronRight size={14} /> SPD <b>{detailsUnit.spd}</b></span></div>
             <p className="dialog-description"><b>ATTRIBUTE · </b>{detailsUnit.attributes.join(' / ')}</p>
-            {detailsHaveDualAttribute && <p className="dual-cancel-note">DUAL ATTRIBUTE · matching opposing attacks are neutralized to 1.0× damage.</p>}
+            {detailsUnit.isColossal && <p className="all-attributes-badge">ALL ATTRIBUTES — NO WEAKNESSES</p>}
+            {detailsHaveDualAttribute && !detailsUnit.isColossal && <p className="dual-cancel-note">DUAL ATTRIBUTE · matching opposing attacks are neutralized to 1.0× damage.</p>}
             <p className="dialog-description"><b>PASSIVE · </b>{detailsUnit.ability}</p>
             <div className="detail-statuses"><b>ACTIVE STATUS</b>{detailsUnit.statuses.length
               ? detailsUnit.statuses.map((status) => <span key={status.kind}>{status.kind} · {status.turns}t</span>)
@@ -1235,7 +1377,7 @@ function App() {
                 </article>)}</div>
               </aside>
             </div> : <div className="team-enemies">{enemies.length ? enemies.map((unit) => <article key={unit.id}><Avatar unit={unit} compact /><span><b>{unit.name}</b><small>{unit.role} · {unit.attributes.join(' / ')} · {unit.hp}/{unit.maxHp} HP</small><small>PHY ATK {unit.physAtk} · MAG ATK {unit.magAtk} · DEF {unit.def} · SPD {unit.spd}</small><small>PASSIVE · {unit.ability}</small><small>BASIC · {unit.skills[0].name} — {unit.skills[0].description}</small><small>ULTIMATE · {unit.skills[3].name} — {unit.skills[3].description}</small></span></article>) : <p className="dialog-description">There are no enemies at this camp.</p>}</div>}
-            <div className="dialog-actions"><button className="gold-button" onClick={() => { setModal(null); setSelectedTeamSwapId(null) }}>DONE / BACK <ChevronRight size={15} /></button></div>
+            <div className="team-modal-hint">Close with X, Escape, or outside the panel. Formation changes are saved immediately.</div>
           </>}
         </section>
       </div>}
