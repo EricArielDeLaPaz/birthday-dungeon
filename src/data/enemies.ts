@@ -23,9 +23,10 @@ const bossHp: Record<string, number> = {
   'boss-bone-dragon': 2000,
 }
 const bossAttackMultiplier: Record<string, number> = {
-  'boss-frostfire': 2,
-  'boss-choir-monolith': 2,
-  'boss-eclipse-seraph': 2,
+  'boss-frostfire': 1,
+  'boss-choir-monolith': 1,
+  'boss-eclipse-seraph': 1,
+  'boss-bone-dragon': 0.5,
 }
 
 const skill = (
