@@ -43,7 +43,7 @@ type SavedRun = {
   sold?: ItemId[]
   enemiesDefeated?: number
 }
-const SAVE_SCHEMA_VERSION = 3
+const SAVE_SCHEMA_VERSION = 4
 const initialItems: Record<ItemId, number> = {
   'healing-potion': 1, 'cleanse-herb': 0, 'valor-tonic': 0, 'ironbark-draught': 0, 'revive-feather': 0,
 }
@@ -52,6 +52,7 @@ function randomEnemyGroup(stage: Stage) {
   const statScale = stage.number === 1 ? 0.9 : 1.5
   return stage.enemies.map((id, index) => {
     const unit = createEnemy(id, index)
+    if (unit.isBoss) return unit
     const maxHp = Math.round(unit.maxHp * statScale)
     return {
       ...unit,
@@ -909,31 +910,56 @@ function App() {
     setSold((current) => [...current, itemId])
   }
 
-  const handleInventoryItem = (itemId: ItemId) => {
-    const usable = itemId === 'revive-feather' ? party.find((unit) => unit.hp <= 0) : party.find((unit) => unit.hp > 0)
+  const handleInventoryItem = (itemId: ItemId, selectedTargetId?: string) => {
+    const isRevive = itemId === 'revive-feather'
+    const usable = isRevive ? roster.find((unit) => unit.hp <= 0) : party.find((unit) => unit.hp > 0)
     if (items[itemId] <= 0) return
     if (!usable) {
-      setMessage(itemId === 'revive-feather' ? 'No fallen hero needs a Revive Feather.' : 'No living party member can use this item.')
+      setMessage(isRevive ? 'No fallen teammates.' : 'No living party member can use this item.')
       return
     }
-    if ((itemId === 'healing-potion' || itemId === 'cleanse-herb' || itemId === 'valor-tonic' || itemId === 'ironbark-draught') &&
+    if (!selectedTargetId && (isRevive || itemId === 'healing-potion' || itemId === 'cleanse-herb' || itemId === 'valor-tonic' || itemId === 'ironbark-draught') &&
       (!selectedUnitForItem || selectedUnitForItem === 'choose')) {
       setSelectedUnitForItem('choose')
       setPendingItem(itemId)
       return
     }
-    const target = selectedUnitForItem && selectedUnitForItem !== 'choose'
-      ? roster.find((unit) => unit.id === selectedUnitForItem) ?? usable
+    const targetId = selectedTargetId ?? (selectedUnitForItem && selectedUnitForItem !== 'choose' ? selectedUnitForItem : undefined)
+    const target = targetId
+      ? roster.find((unit) => unit.id === targetId) ?? usable
       : usable
-    if (itemId === 'revive-feather' && target.hp > 0) {
-      setMessage('Choose a fallen hero for the Revive Feather.')
+    if (isRevive && target.hp > 0) {
+      setMessage('Choose a fallen teammate for the Revive Feather.')
       return
     }
-    updateRoster(target.id, (unit) => applyItem(unit, itemId))
+    const updatedTarget = applyItem(target, itemId)
+    updateRoster(target.id, () => updatedTarget)
+    if (isRevive) {
+      let updatedTeamIds = [...teamIds]
+      if (!updatedTeamIds.includes(target.id)) {
+        const fallenSlot = updatedTeamIds.findIndex((id) => (roster.find((unit) => unit.id === id)?.hp ?? 1) <= 0)
+        if (fallenSlot >= 0) {
+          const fallen = roster.find((unit) => unit.id === updatedTeamIds[fallenSlot])
+          updatedTeamIds[fallenSlot] = target.id
+          if (fallen) updateRoster(target.id, (unit) => ({ ...unit, row: fallen.row ?? 'Back' }))
+        }
+        else if (updatedTeamIds.length < 5) updatedTeamIds.push(target.id)
+      }
+      setTeamIds(updatedTeamIds)
+      if (!activeHeroId || !updatedTeamIds.some((id) => id === activeHeroId && (roster.find((unit) => unit.id === id)?.hp ?? 0) > 0)) {
+        setActiveHeroId(target.id)
+      }
+      addFloats([makeFloat(target.id, `REVIVE +${updatedTarget.hp}`, 'heal')])
+    }
     setItems((current) => ({ ...current, [itemId]: current[itemId] - 1 }))
     setSelectedUnitForItem(null)
     setPendingItem(null)
-    setMessage(`${itemId.replaceAll('-', ' ')} used on ${target.name}.`)
+    const revivedOnBench = isRevive && !teamIds.includes(target.id) &&
+      teamIds.every((id) => (roster.find((unit) => unit.id === id)?.hp ?? 0) > 0) &&
+      teamIds.length >= 5
+    setMessage(isRevive
+      ? `${target.name} was revived${revivedOnBench ? ' on the bench' : ''}!`
+      : `${itemId.replaceAll('-', ' ')} used on ${target.name}.`)
   }
 
   const chooseTeamMember = (unit: Unit) => {
@@ -1351,7 +1377,37 @@ function App() {
           {modal === 'camp' && <><div className="campfire-scene"><DungeonBackdrop key="campfire-rest" areaId="campfire-rest" /><span>♨</span></div><div className="dialog-kicker">A MOMENT OF RESPITE · STAGE {stage.number}</div><h2>{stage.title}</h2><p className="dialog-description">The road is quiet. Choose how your party spends this pause.</p><div className="camp-choices"><button onClick={() => chooseCamp('rest')}><Heart size={19} /><b>Rest at Campfire</b><span>Heal the whole party by 50% and revive fallen heroes.</span></button><button onClick={() => chooseCamp('scavenge')}><Coins size={19} /><b>Claim Hidden Cache</b><span>Find 100 gold for your journey.</span></button></div></>}
           {modal === 'hostage' && <><div className="dialog-icon"><Sparkles size={24} /></div><div className="dialog-kicker">A CAGE UNLOCKED</div><h2>A new companion awaits.</h2><p className="dialog-description">Freed companion {activeStage.hostages - hostagesLeft + 1} of {activeStage.hostages}. Choose a place in your roster or accept 60 gold.</p>{(() => { const offerIndex = activeStage.hostages - hostagesLeft; const rescued = recruits.find((unit) => unit.id === hostageOfferIds[offerIndex]) ?? recruits.find((unit) => !roster.some((hero) => hero.id === unit.id)); return rescued ? <div className="hostage-recruit"><Avatar unit={rescued} /><div><b>{rescued.name}</b><span>{rescued.role} · {rescued.attributes.join(' / ')}</span><small>Passive: {rescued.ability}</small><small>{rescued.skills.map((skill) => skill.name).join(' · ')}</small></div></div> : <div className="hostage-recruit"><Avatar unit={heroes[0]} /><div><b>Your roster is complete</b><span>Accept gold to continue the descent.</span></div></div> })()}<div className="dialog-actions"><button className="gold-button" onClick={() => chooseHostage(true)}><Plus size={15} /> Recruit to Roster</button><button className="outline-button" onClick={() => chooseHostage(false)}><Coins size={15} /> Accept 60 Gold</button></div></>}
           {modal === 'shop' && <><div className="dialog-kicker">THE WAYFARER’S STALL · STAGE {stageNumber}</div><h2>Useful things, fair prices.</h2><p className="dialog-description">Stock refreshes at every stage. Supplies last until used.</p><div className="shop-list">{shopItems.map((item) => <div className="shop-row" key={item.id}><span className="shop-item-icon"><Sparkles size={16} /></span><div><b>{item.name}</b><small>{item.description}</small></div><button disabled={gold < item.cost || sold.includes(item.id)} onClick={() => buyItem(item.id)}>{sold.includes(item.id) ? 'SOLD' : <><Coins size={13} /> {item.cost}</>}</button></div>)}</div><div className="dialog-foot"><span><Coins size={14} /> Purse</span><b>{gold} G</b></div></>}
-          {modal === 'items' && <><div className="dialog-kicker">YOUR PACK</div><h2>Carry a little magic.</h2><p className="dialog-description">{selectedUnitForItem === 'choose' ? `Choose a hero for ${pendingItem?.replaceAll('-', ' ') ?? 'this item'}.` : 'Select an item to use during this stage.'}</p><div className="inventory-list">{shopItems.map((item) => <button key={item.id} disabled={items[item.id] < 1} className="inventory-row" onClick={() => handleInventoryItem(item.id)}><span className="inventory-count">{items[item.id]}</span><span><b>{item.name}</b><small>{item.description}</small></span><ChevronRight size={15} /></button>)}</div>{selectedUnitForItem && <div className="item-targets"><b>USE ON</b>{party.map((unit) => <button key={unit.id} disabled={pendingItem === 'revive-feather' ? unit.hp > 0 : unit.hp <= 0} onClick={() => { setSelectedUnitForItem(unit.id); setMessage(`${unit.name} selected.`) }} className={selectedUnitForItem === unit.id ? 'picked' : ''}><Avatar unit={unit} compact />{unit.name} <small>{unit.hp}/{unit.maxHp}</small></button>)}</div>}</>}
+          {modal === 'items' && <>
+            <div className="dialog-kicker">YOUR PACK</div><h2>Carry a little magic.</h2>
+            <p className="dialog-description">{selectedUnitForItem === 'choose' ? `Choose a hero for ${pendingItem?.replaceAll('-', ' ') ?? 'this item'}.` : 'Select an item to use during this stage.'}</p>
+            <div className="inventory-list">{shopItems.map((item) => <button key={item.id}
+              disabled={items[item.id] < 1 || (item.id === 'revive-feather' && !roster.some((unit) => unit.hp <= 0))}
+              className="inventory-row" onClick={() => handleInventoryItem(item.id)}>
+              <span className="inventory-count">{items[item.id]}</span><span><b>{item.name}</b><small>{item.description}</small></span><ChevronRight size={15} />
+            </button>)}</div>
+            {!roster.some((unit) => unit.hp <= 0) && <p className="dialog-description">No fallen teammates.</p>}
+            {selectedUnitForItem && (() => {
+              const choosingRevive = pendingItem === 'revive-feather'
+              const targets = choosingRevive ? roster.filter((unit) => unit.hp <= 0) : party.filter((unit) => unit.hp > 0)
+              return <div className="item-targets"><b>{choosingRevive ? 'FALLEN TEAMMATES' : 'USE ON'}</b>
+                {targets.length ? targets.map((unit) => <button key={unit.id}
+                  onClick={() => pendingItem ? handleInventoryItem(pendingItem, unit.id) : setSelectedUnitForItem(unit.id)}
+                  className={selectedUnitForItem === unit.id ? 'picked' : ''}>
+                  <Avatar unit={unit} compact />{unit.name} <small>{unit.hp}/{unit.maxHp}{!teamIds.includes(unit.id) ? ' · BENCH' : ''}</small>
+                  {floating.filter((text) => text.targetId === unit.id && text.kind === 'heal').map((text) =>
+                    <span key={text.id} className="float-number heal">{text.text}</span>,
+                  )}
+                </button>) : <p className="dialog-description">No fallen teammates.</p>}
+              </div>
+            })()}
+            {floating.filter((text) => text.text.startsWith('REVIVE ')).map((text) => {
+              const revived = roster.find((unit) => unit.id === text.targetId)
+              return revived ? <div className="revive-feedback" key={text.id}>
+                <Avatar unit={revived} compact /><b>{revived.name}</b>
+                <span className="float-number heal">{text.text}</span>
+              </div> : null
+            })}
+          </>}
           {modal === 'team' && <>
             <div className="dialog-kicker">COMPANY & FORMATION</div>
             <h2>Your team, your tactics.</h2>

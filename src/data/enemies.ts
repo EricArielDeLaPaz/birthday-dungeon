@@ -22,6 +22,11 @@ const bossHp: Record<string, number> = {
   'boss-eclipse-seraph': 1500,
   'boss-bone-dragon': 2000,
 }
+const bossAttackMultiplier: Record<string, number> = {
+  'boss-frostfire': 2,
+  'boss-choir-monolith': 2,
+  'boss-eclipse-seraph': 2,
+}
 
 const skill = (
   name: string,
@@ -48,9 +53,13 @@ const enemy = (
 ): Unit => {
   const bossMultiplier = options.isBoss ? 0.5 : 1
   const maxHp = bossHp[id] ?? Math.round(stats[0] * bossMultiplier)
+  const attackMultiplier = bossAttackMultiplier[id] ?? 1
+  const physAtk = Math.round(Math.round(stats[1] * bossMultiplier) * attackMultiplier)
+  const magAtk = Math.round(Math.round(stats[2] * bossMultiplier) * attackMultiplier)
   return {
-    id, name, role, attributes, hp: maxHp, maxHp, physAtk: Math.round(stats[1] * bossMultiplier),
-    magAtk: Math.round(stats[2] * bossMultiplier), def: stats[3], spd: Math.min(stats[4], 90), ability, passive: ability,
+    id, name, role, attributes, hp: maxHp, maxHp,
+    physAtk, magAtk,
+    def: stats[3], spd: Math.min(stats[4], 90), ability, passive: ability,
     skills, statuses: [], gauge: [0, 0, 0], ...options,
   }
 }
@@ -144,7 +153,7 @@ export const bosses: Unit[] = [
     ultimate('Tectonic Requiem', 'Sound', 'magic', 'all-enemies', 168, 'A crushing soundwave lays a two-turn Curse.', 'Curse'),
   ], { isBoss: true, bossUltimate: true }),
   enemy('boss-eclipse-seraph', 'Nyx-Aurelia, Eclipse Seraph', 'Mage', ['Light', 'Shadow'], [920, 60, 68, 32, 34], 'Twin Eclipse · Light/Shadow cancellation; alternates Solar and Umbral stances.', [
-    basic('Eclipse Brand', 'Light', 'magic', 'all-enemies', 16, 'Solar stance: a light brand strikes the whole party.'),
+    basic('Eclipse Brand', 'Light', 'magic', 'all-enemies', 160, 'Solar stance: a light brand strikes the whole party.'),
     placeholder, placeholder,
     ultimate('Shattered Halo', 'Light', 'magic', 'all-enemies', 190, 'A devastating Light and Shadow strike inflicts Burn and Curse.', ['Burn', 'Curse'], undefined, ['Shadow']),
   ], { isBoss: true, bossUltimate: true }),

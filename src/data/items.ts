@@ -16,7 +16,11 @@ export function applyItem(unit: Unit, item: ItemId): Unit {
     const healing = unit.statuses.some((status) => status.kind === 'Curse') ? 0.15 : 0.3
     return { ...unit, hp: Math.min(unit.maxHp, unit.hp + Math.round(unit.maxHp * healing)) }
   }
-  if (item === 'revive-feather') return { ...unit, hp: Math.max(unit.hp, Math.round(unit.maxHp * 0.3)) }
+  if (item === 'revive-feather') return {
+    ...unit,
+    hp: Math.max(1, Math.round(unit.maxHp * 0.3)),
+    statuses: [],
+  }
   if (item === 'cleanse-herb') return { ...unit, statuses: unit.statuses.filter((status) => !['Burn', 'Curse', 'Freeze', 'Taunt', 'DEF Down'].includes(status.kind)) }
   const kind = item === 'valor-tonic' ? 'ATK Up' : 'DEF Up'
   return { ...unit, statuses: [...unit.statuses.filter((status) => status.kind !== kind), { kind, turns: 99 }] }
