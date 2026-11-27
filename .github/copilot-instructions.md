@@ -6,3 +6,5 @@
 - **Full Status Names Only:** Always display full readable status names (`Stealth`, `Burn`, `Curse`, `Taunt`, `ATK Up`, `DEF Up`). Never abbreviate (no `STL`, `BRN`, `CRS`).
 - **Concise Skill Descriptions:** Keep every skill description short and mechanical (e.g., `"Deals 100% Phys ATK to 1 enemy."`, `"Heals party by 30% of their Max HP."`).
 - **No Row Text Labels in Arena:** Do NOT render `"FRONT ROW"` or `"BACK ROW"` text labels on the battlefield pads.
+- **Boss HP:** Bosses have exact max/current HP values: Kryo-Ignis (Stage 5) 1,000; Choir-Warden Monolith (Stage 10) 1,250; Nyx-Aurelia (Stage 15) 1,500; Vaelgor (Stage 16) 2,000. Keep their reduced attack stats unchanged unless specifically requested.
+- **Elemental Status Immunities:** Ice-attribute units are immune to Freeze, Fire-attribute units are immune to Burn, and Light-attribute units are immune to Curse. Apply these centrally through `addStatus` in `src/engine/combat.ts`; blocked skill effects still allow damage and show an `IMMUNE` popup and callout.

@@ -146,6 +146,10 @@ button:disabled { cursor: not-allowed; }
 .pad-unit-nameplate > b { width: 100%; overflow: hidden; color: #F3EFE6; font: 700 12px/16px var(--mono); text-overflow: ellipsis; white-space: nowrap; }
 .pad-unit-nameplate > span { color: #D1D8D2; font: 12px/16px var(--mono); }
 .pad-unit-nameplate .health-track { width: 96px; height: 8px; border: 1px solid #080B10; }
+.float-number { position: absolute; z-index: 8; top: 20%; left: 50%; color: #FFF4D6; font: 900 20px/24px var(--mono); text-shadow: 2px 2px 0 #111, -1px -1px 0 #111, 0 0 10px #000; white-space: nowrap; pointer-events: none; animation: float-hit 1.2s ease-out both; }
+.float-number.damage { color: #FFF1E8; }
+.float-number.heal { color: #9DF0B5; }
+.float-number.status { top: 8%; color: #F7D77D; font-size: 16px; text-shadow: 2px 2px 0 #111, -1px -1px 0 #111, 0 0 12px #D94848; animation-name: float-status; }
 .pad-unit.selected .pad-unit-name { color: var(--gold); }
 .pad-unit.target-valid .pad-circle-marker { border-color: #E8D093; outline: 2px solid #E8D09355; }
 .pad-unit.fallen { opacity: .28; }
@@ -375,6 +379,7 @@ button:disabled { cursor: not-allowed; }
 .confetti-field i:nth-child(4n) { background: #7E9A83; }
 
 @keyframes float-hit { 0% { opacity: 0; transform: translate(-50%, 8px); } 18% { opacity: 1; } 100% { opacity: 0; transform: translate(-50%, -34px); } }
+@keyframes float-status { 0% { opacity: 0; transform: translate(-50%, 4px) scale(.8); } 18% { opacity: 1; transform: translate(-50%, 0) scale(1.08); } 100% { opacity: 0; transform: translate(-50%, -28px) scale(1); } }
 @keyframes hero-lunge { 0%,100% { transform: translate(-50%, var(--foot-offset)); } 45% { transform: translate(22%, var(--foot-offset)); } }
 @keyframes enemy-lunge { 0%,100% { transform: translate(-50%, var(--foot-offset)); } 45% { transform: translate(-122%, var(--foot-offset)); } }
 @keyframes hit-burst { 0% { opacity: .5; transform: scale(.92); } 100% { opacity: 0; transform: scale(1.04); } }
@@ -800,6 +805,7 @@ button:disabled { cursor: not-allowed; }
 .attribute-chart-row > i { color: var(--gold); font-size: 24px; font-style: normal; }
 .chart-multiplier { color: #E8D39D; font: 700 16px var(--mono); }
 .dual-cancel-note { font-size: 12px; line-height: 1.5; }
+.dual-cancel-note + .dual-cancel-note { padding-top: 8px; border-top: 1px solid #3B4453; }
 .hostage-details-dialog { width: min(600px, 100%); }
 .cage-hostage-list { display: grid; gap: 8px; max-height: 55vh; overflow-y: auto; }
 .cage-hostage-list article { display: flex; align-items: center; gap: 12px; padding: 10px; border: 1px solid #485263; background: #151920; text-align: left; }

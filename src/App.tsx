@@ -13,7 +13,7 @@ import { shopItems, applyItem, type ItemId } from './data/items'
 import { stages, type Stage } from './data/stages'
 import {
   addStatus, calculateDamage, chargeGauge, expireStageBuffs, formationBonus,
-  getTargetId, opposingAttribute, sortBySpeed, tickStatuses, type FloatingText, type Skill, type Unit,
+  getTargetId, isStatusImmune, opposingAttribute, sortBySpeed, tickStatuses, type FloatingText, type Skill, type Unit,
 } from './engine/combat'
 
 type Modal = 'shop' | 'team' | 'items' | 'details' | 'hostage' | 'hostage-details' | 'camp' | 'chart' | null
@@ -43,7 +43,7 @@ type SavedRun = {
   sold?: ItemId[]
   enemiesDefeated?: number
 }
-const SAVE_SCHEMA_VERSION = 2
+const SAVE_SCHEMA_VERSION = 3
 const initialItems: Record<ItemId, number> = {
   'healing-potion': 1, 'cleanse-herb': 0, 'valor-tonic': 0, 'ironbark-draught': 0, 'revive-feather': 0,
 }
@@ -527,8 +527,15 @@ function App() {
     let updatedEnemies = [...enemies]
     const bonus = formationBonus(actor)
     const skillDuration = actor.id === 'ember' && (skill.effect === 'Burn' || (Array.isArray(skill.effect) && skill.effect.includes('Burn'))) ? 3 : 2
+    const immunityCallouts: string[] = []
     const lyraBonus = actor.id === 'lyra' && skill.attribute === 'Ice' && !actor.passiveUsed && skill.type !== 'heal'
     const applySkillEffects = (target: Unit) => {
+      const effects = skill.effect ? (Array.isArray(skill.effect) ? skill.effect : [skill.effect]) : []
+      const blocked = effects.filter((kind) => isStatusImmune(target, kind))
+      if (blocked.length) {
+        texts.push(makeFloat(target.id, 'IMMUNE', 'status'))
+        immunityCallouts.push(`${target.name} is immune to ${[...new Set(blocked)].join(', ')}!`)
+      }
       let updated = applyStatus(target, skill.effect, skillDuration)
       if (skill.cleanseDebuffs) updated = { ...updated, statuses: updated.statuses.filter((status) =>
         !['Burn', 'Curse', 'Freeze', 'DEF Down', 'Taunt'].includes(status.kind),
@@ -600,9 +607,9 @@ function App() {
         target.attributes.includes(opposingAttribute[attribute]) && !target.attributes.includes(attribute),
       ),
     )
-    setMessage(weaknessHit
+    setMessage(`${weaknessHit
       ? `WEAKNESS! 2× DAMAGE! ${actor.name} used ${skill.name}.`
-      : `${actor.name} used ${skill.name}.`)
+      : `${actor.name} used ${skill.name}.`}${immunityCallouts.length ? ` ${[...new Set(immunityCallouts)].join(' ')}` : ''}`)
     setSelectedSkill(null)
     setAttackMode(false)
     window.setTimeout(() => {
@@ -693,6 +700,7 @@ function App() {
     const targetsForAction = enemyTeamHeal
       ? enemyAfter.filter((unit) => unit.hp > 0)
       : enemySkill.target === 'all-enemies' ? targets : targets.filter((unit) => unit.id === targetId)
+    const immunityCallouts: string[] = []
 
     targetsForAction.forEach((target) => {
       if (enemySkill.type === 'heal') {
@@ -703,6 +711,12 @@ function App() {
         texts.push(makeFloat(target.id, `+${heal}`, 'heal'))
       } else {
         const damage = calculateDamage(actingEnemy, target, enemySkill)
+        const effects = enemySkill.effect ? (Array.isArray(enemySkill.effect) ? enemySkill.effect : [enemySkill.effect]) : []
+        const blocked = damage === 0 ? [] : effects.filter((kind) => isStatusImmune(target, kind))
+        if (blocked.length) {
+          texts.push(makeFloat(target.id, 'IMMUNE', 'status'))
+          immunityCallouts.push(`${target.name} is immune to ${[...new Set(blocked)].join(', ')}!`)
+        }
         const wounded = damage === 0 ? target : applyStatus({ ...target, hp: Math.max(0, target.hp - damage) }, enemySkill.effect)
         partyAfter = partyAfter.map((unit) => unit.id === target.id ? wounded : unit)
         texts.push(makeFloat(target.id, damage ? `-${damage}` : 'DODGE', damage ? 'damage' : 'status'))
@@ -780,9 +794,9 @@ function App() {
         localStorage.removeItem('mythic-dungeon-save')
       }, duration)
     }
-    if (!dramatic) setLog(useUltimate
+    setLog(`${useUltimate
       ? `${actingEnemy.name} unleashes ${enemySkill.name}!`
-      : gauge[0] === 3 ? `${actingEnemy.name} charges ${actingEnemy.skills[3].name}!` : `${actingEnemy.name} used ${enemySkill.name}.`)
+      : gauge[0] === 3 ? `${actingEnemy.name} charges ${actingEnemy.skills[3].name}!` : `${actingEnemy.name} used ${enemySkill.name}.`}${immunityCallouts.length ? ` ${[...new Set(immunityCallouts)].join(' ')}` : ''}`)
     return { duration, roster: partyAfter, teamIds: updatedTeamIds, defeated }
   }
 
@@ -1325,6 +1339,7 @@ function App() {
               <span className={`attribute-emblem attr-${second.toLowerCase()}`}>{second === 'Shadow' ? '◈' : second === 'Fire' ? '♨' : '⬟'}<b>{second}</b></span>
             </div>)}</div>
             <p className="dual-cancel-note">Dual-attribute bosses with both opposing elements take 1.0× normal damage instead.</p>
+            <p className="dual-cancel-note"><b>Elemental Immunities</b> · Ice: Immune to Freeze · Fire: Immune to Burn · Light: Immune to Curse</p>
           </>}
           {modal === 'hostage-details' && <>
             <div className="dialog-kicker">HOSTAGE CAGE · STAGE {stage.number}</div><h2>Captives awaiting rescue</h2>

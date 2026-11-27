@@ -107,8 +107,15 @@ export function tickStatuses(unit: Unit): { unit: Unit; damage: number } {
 }
 
 export function addStatus(unit: Unit, kind: StatusKind, turns = 2): Unit {
-  if (kind === 'Freeze' && (unit.freezeImmuneTurns ?? 0) > 0) return unit
+  if (isStatusImmune(unit, kind) || (kind === 'Freeze' && (unit.freezeImmuneTurns ?? 0) > 0)) return unit
   return { ...unit, statuses: [...unit.statuses.filter((status) => status.kind !== kind), { kind, turns }] }
+}
+
+export function isStatusImmune(unit: Unit, kind: StatusKind): boolean {
+  const attributes = unit.attributes.map((attribute) => attribute.toLowerCase())
+  return (kind === 'Freeze' && attributes.includes('ice')) ||
+    (kind === 'Burn' && attributes.includes('fire')) ||
+    (kind === 'Curse' && attributes.includes('light'))
 }
 
 export function formationBonus(unit: Unit) {

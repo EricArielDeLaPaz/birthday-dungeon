@@ -16,6 +16,13 @@ const conciseDescription = (power: number, type: Skill['type'], target: Skill['t
   return [description, ...effectText].filter(Boolean).join(' ')
 }
 
+const bossHp: Record<string, number> = {
+  'boss-frostfire': 1000,
+  'boss-choir-monolith': 1250,
+  'boss-eclipse-seraph': 1500,
+  'boss-bone-dragon': 2000,
+}
+
 const skill = (
   name: string,
   cost: number,
@@ -40,7 +47,7 @@ const enemy = (
   options: Partial<Unit> = {},
 ): Unit => {
   const bossMultiplier = options.isBoss ? 0.5 : 1
-  const maxHp = Math.round(stats[0] * bossMultiplier)
+  const maxHp = bossHp[id] ?? Math.round(stats[0] * bossMultiplier)
   return {
     id, name, role, attributes, hp: maxHp, maxHp, physAtk: Math.round(stats[1] * bossMultiplier),
     magAtk: Math.round(stats[2] * bossMultiplier), def: stats[3], spd: Math.min(stats[4], 90), ability, passive: ability,
