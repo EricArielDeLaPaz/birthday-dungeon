@@ -46,13 +46,13 @@ const skill = (
 
 const makeHero = (hero: Omit<Unit, 'statuses' | 'gauge'>): Unit => {
   const hpScale = hero.role === 'Tank' ? 1.3 * 1.5 : 1.3
-  const maxHp = Math.round(hero.maxHp * hpScale)
+  const maxHp = Math.round(hero.maxHp * hpScale * 2)
   return {
     ...hero,
     hp: maxHp,
     maxHp,
-    physAtk: Math.round(hero.physAtk * 1.3),
-    magAtk: Math.round(hero.magAtk * 1.3),
+    physAtk: Math.round(hero.physAtk * 1.3 * 1.5),
+    magAtk: Math.round(hero.magAtk * 1.3 * 1.5),
     def: Math.round(hero.def * 1.15),
     spd: hero.role === 'Assassin' ? Math.max(100, hero.spd) : Math.min(70, hero.spd),
     statuses: [],

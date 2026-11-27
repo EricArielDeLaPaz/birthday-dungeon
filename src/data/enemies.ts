@@ -38,11 +38,15 @@ const enemy = (
   ability: string,
   skills: Unit['skills'],
   options: Partial<Unit> = {},
-): Unit => ({
-  id, name, role, attributes, hp: stats[0], maxHp: stats[0], physAtk: stats[1],
-  magAtk: stats[2], def: stats[3], spd: Math.min(stats[4], 90), ability, passive: ability,
-  skills, statuses: [], gauge: [0, 0, 0], ...options,
-})
+): Unit => {
+  const bossMultiplier = options.isBoss ? 0.5 : 1
+  const maxHp = Math.round(stats[0] * bossMultiplier)
+  return {
+    id, name, role, attributes, hp: maxHp, maxHp, physAtk: Math.round(stats[1] * bossMultiplier),
+    magAtk: Math.round(stats[2] * bossMultiplier), def: stats[3], spd: Math.min(stats[4], 90), ability, passive: ability,
+    skills, statuses: [], gauge: [0, 0, 0], ...options,
+  }
+}
 
 const basic = (
   name: string,

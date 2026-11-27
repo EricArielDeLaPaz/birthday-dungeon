@@ -82,6 +82,7 @@ button:disabled { cursor: not-allowed; }
 .avatar-small { width: 38px; height: 42px; }
 .avatar.combat-avatar { width: 100%; height: 100%; overflow: visible; }
 .avatar.combat-avatar > img,.avatar.combat-avatar .pixel-sprite { width: 100%; height: 100%; object-fit: contain; }
+.avatar.combat-avatar > img { object-position: center bottom; image-rendering: auto; }
 .unit-name-wrap { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 3px; }
 .unit-name-wrap b { overflow: hidden; color: var(--bone); font-size: 10px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .unit-name-wrap > span { color: var(--muted); font-size: 8px; }
@@ -348,6 +349,9 @@ button:disabled { cursor: not-allowed; }
 .ultimate-cutin > i { color: var(--gold); font-size: 37px; }
 .boss-cutin { background: #21191BEF; }
 .boss-cutin > .avatar { width: 190px; height: 220px; }
+.ultimate-cutin > .avatar { width: 220px; height: 260px; flex: 0 0 auto; }
+.boss-cutin > .avatar { width: 260px; height: 300px; }
+.ultimate-cutin > .avatar > img { object-fit: contain; object-position: center bottom; image-rendering: auto; }
 .cutin-flash { position: absolute; inset: 0; background: #F3EFE6; opacity: 0; animation: screen-flash .28s ease-out; }
 
 .victory-screen { position: relative; display: grid; min-height: 100vh; place-items: center; overflow: hidden; padding: 28px; background: #171B23; }
@@ -959,6 +963,8 @@ button:disabled { cursor: not-allowed; }
 .battle-vfx.vfx-ultimate .ultimate-finisher path:last-child { fill: currentColor; stroke-width: 2; }
 .ultimate-cutin { animation: cutin-enter 700ms ease-out both; }
 .ultimate-cutin::after { background: linear-gradient(90deg, transparent, #C9A45C, transparent); }
+.combat-illustration { display: flex; width: clamp(200px, 22vw, 320px); height: clamp(240px, 40vh, 320px); z-index: 5; }
+.combat-illustration .avatar { width: 100%; height: 100%; }
 
 .pad-unit.attacking .sprite-anchor { animation-delay: 0ms; }
 .formation-pad .pad-unit { --dash-x: 0cqi; --dash-y: 0cqb; }

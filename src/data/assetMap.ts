@@ -16,11 +16,24 @@ const backgroundFiles = import.meta.glob('../assets/backgrounds/*.png', {
   query: '?url',
   import: 'default',
 }) as Record<string, string>
+const illustrationFiles = import.meta.glob('../assets/illustrations/*.png', {
+  eager: true,
+  query: '?url',
+  import: 'default',
+}) as Record<string, string>
 
 const spriteUrl = (fileName: string) => spriteFiles[`../assets/sprites/${fileName}.png`]
-const publicAssetUrl = (path: string) => `${import.meta.env.BASE_URL}${path}`
+const illustrationUrl = (fileName: string) => illustrationFiles[`../assets/illustrations/${fileName}.png`]
+export const resolveAssetPath = (path: string) => {
+  if (/^(?:[a-z]+:|data:|blob:)/i.test(path)) return path
+  const baseUrl = import.meta.env.BASE_URL
+  if (path.startsWith(baseUrl)) return path
+  return `${baseUrl}${path.replace(/^(?:\.\/|\/)+/, '')}`
+}
+const publicAssetUrl = (path: string) => resolveAssetPath(path)
 const heroAsset = (fileName: string, scale = 1, footOffsetPx = 4): UnitAssetConfig => ({
   pixelSprite: spriteUrl(fileName),
+  combatIllustration: illustrationUrl(fileName),
   scale,
   footOffsetPx,
   flipX: false,
@@ -39,13 +52,15 @@ export const HERO_ASSETS: Record<string, UnitAssetConfig> = {
   zephyr: heroAsset('zephyr'),
   aurelia: heroAsset('aurelia'),
   glacia: heroAsset('glacia'),
+  cinder: heroAsset('cinder'),
+  orion: heroAsset('orion'),
 }
 
 export const ENEMY_ASSETS: Record<string, UnitAssetConfig> = {
-  'boss-bone-dragon': { pixelSprite: publicAssetUrl('assets/bosses/boss-bone-dragon.png'), combatIllustration: publicAssetUrl('assets/bosses/boss-bone-dragon-ult.png'), scale: 2.5, footOffsetPx: 10 },
-  'boss-choir-monolith': { scale: 1.85, footOffsetPx: 10 },
-  'boss-eclipse-seraph': { scale: 1.95, footOffsetPx: 8 },
-  'boss-frostfire': { pixelSprite: publicAssetUrl('assets/bosses/boss-frostfire.png'), combatIllustration: publicAssetUrl('assets/bosses/boss-frostfire-ult.png'), scale: 1.9, footOffsetPx: 10 },
+  'boss-bone-dragon': { combatIllustration: publicAssetUrl('assets/bosses/boss-bone-dragon-ult.png'), scale: 2.5, footOffsetPx: 10 },
+  'boss-choir-monolith': { pixelSprite: spriteUrl('resonance-golem'), scale: 1.85, footOffsetPx: 10 },
+  'boss-eclipse-seraph': { pixelSprite: spriteUrl('eclipse-sovereign'), scale: 1.95, footOffsetPx: 8 },
+  'boss-frostfire': { pixelSprite: spriteUrl('ignis-rex'), combatIllustration: publicAssetUrl('assets/bosses/boss-frostfire-ult.png'), scale: 1.9, footOffsetPx: 10 },
   'minidragon-fire': { scale: 1, footOffsetPx: 4 },
   'minidragon-ice': { scale: 1, footOffsetPx: 4 },
   'minidragon-earth': { scale: 1.04, footOffsetPx: 4 },

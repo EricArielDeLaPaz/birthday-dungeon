@@ -4,7 +4,7 @@ import {
   Shield, ShoppingBag, Sparkles, Swords, UsersRound, X,
 } from 'lucide-react'
 import './App.css'
-import { assetMap, DUNGEON_BACKGROUNDS } from './data/assetMap'
+import { assetMap, DUNGEON_BACKGROUNDS, resolveAssetPath } from './data/assetMap'
 import { BIRTHDAY_CONFIG } from './data/birthdayConfig'
 import { createEnemy } from './data/enemies'
 import { ENEMY_SLOTS, PLAYER_SLOTS } from './data/formationSlots'
@@ -29,6 +29,7 @@ type VfxEvent = {
   destination: { x: number; y: number }
 }
 type SavedRun = {
+  schemaVersion: number
   stageNumber: number
   gold: number
   roster: Unit[]
@@ -42,6 +43,7 @@ type SavedRun = {
   sold?: ItemId[]
   enemiesDefeated?: number
 }
+const SAVE_SCHEMA_VERSION = 2
 const initialItems: Record<ItemId, number> = {
   'healing-potion': 1, 'cleanse-herb': 0, 'valor-tonic': 0, 'ironbark-draught': 0, 'revive-feather': 0,
 }
@@ -118,18 +120,25 @@ function unitBattlePosition(unit: Unit, units: Unit[], side: 'heroes' | 'enemies
 function UnitSprite({ unit, compact = false, combat = false, facing }: { unit: Unit; compact?: boolean; combat?: boolean; facing?: 'left' | 'right' }) {
   const assetId = unit.id.replace(/-\d+$/, '')
   const art = assetMap[assetId] ?? { accent: '#C9A45C', glyph: '✦', scale: 1, footOffsetPx: 4 }
-  const sprite = combat ? art.combatIllustrationUrl ?? art.pixelSpriteUrl : art.pixelSpriteUrl
+  const illustrationSrc = combat && art.combatIllustrationUrl ? resolveAssetPath(art.combatIllustrationUrl) : undefined
+  const pixelSpriteSrc = art.pixelSpriteUrl ? resolveAssetPath(art.pixelSpriteUrl) : undefined
+  const sourceKey = illustrationSrc ?? pixelSpriteSrc ?? ''
+  const [failedSrc, setFailedSrc] = useState<string | null>(null)
+  useEffect(() => setFailedSrc(null), [sourceKey])
+  const resolvedSrc = illustrationSrc && failedSrc !== illustrationSrc
+    ? illustrationSrc
+    : pixelSpriteSrc && failedSrc !== pixelSpriteSrc
+      ? pixelSpriteSrc
+      : undefined
   const flipSprite = facing === 'left' ? !art.flipX : Boolean(art.flipX)
-  const [failedSprite, setFailedSprite] = useState<string | null>(null)
-  const failed = failedSprite === sprite
   const boss = assetId.startsWith('boss-')
   const dragon = assetId.startsWith('minidragon-')
   const accent = art.accent
   const ink = '#171a20'
   return (
     <span className={`avatar ${compact ? 'avatar-small' : ''} ${combat ? 'combat-avatar' : ''} ${boss ? 'sprite-boss' : ''} ${dragon ? 'sprite-dragon' : ''}`} style={{ '--avatar-accent': accent, '--sprite-scale': art.scale } as React.CSSProperties} aria-hidden="true">
-      {sprite && !failed && <img className={flipSprite ? 'sprite-flipped' : ''} src={sprite} alt="" onError={(event) => setFailedSprite(event.currentTarget.getAttribute('src') ?? '')} />}
-      {(!sprite || failed) && <svg className={`pixel-sprite procedural-sprite ${flipSprite ? 'sprite-flipped' : ''}`} viewBox="0 0 120 150" shapeRendering="crispEdges" aria-hidden="true">
+      {resolvedSrc && <img key={resolvedSrc} className={flipSprite ? 'sprite-flipped' : ''} src={resolvedSrc} alt="" onError={() => setFailedSrc(resolvedSrc)} />}
+      {!resolvedSrc && <svg className={`pixel-sprite procedural-sprite ${flipSprite ? 'sprite-flipped' : ''}`} viewBox="0 0 120 150" shapeRendering="crispEdges" aria-hidden="true">
         <ellipse cx="60" cy="142" rx="34" ry="5" fill="#090b0f" opacity=".7" />
         {assetId === 'boss-bone-dragon' ? <>
           <path d="M56 59 11 15 19 50 5 39 22 75 44 87M64 59l45-44-8 35 14-11-17 36-22 8" fill="#d4c9ac" stroke={ink} strokeWidth="4" />
@@ -337,7 +346,13 @@ function App() {
   const [saved, setSaved] = useState<SavedRun | null>(() => {
     try {
       const raw = localStorage.getItem('mythic-dungeon-save')
-      return raw ? JSON.parse(raw) as SavedRun : null
+      if (!raw) return null
+      const loaded = JSON.parse(raw) as SavedRun
+      if (loaded.schemaVersion !== SAVE_SCHEMA_VERSION) {
+        localStorage.removeItem('mythic-dungeon-save')
+        return null
+      }
+      return loaded
     } catch (error) {
       console.error('Unable to load the saved dungeon run.', error)
       return null
@@ -400,7 +415,7 @@ function App() {
 
   useEffect(() => {
     if (started && roster.length) {
-      const next = { stageNumber, gold, roster, teamIds, items, turns, enemies, hostagesLeft, hostageOfferIds, enemyTurnIndex, sold, enemiesDefeated }
+      const next = { schemaVersion: SAVE_SCHEMA_VERSION, stageNumber, gold, roster, teamIds, items, turns, enemies, hostagesLeft, hostageOfferIds, enemyTurnIndex, sold, enemiesDefeated }
       localStorage.setItem('mythic-dungeon-save', JSON.stringify(next))
     }
   }, [started, stageNumber, gold, roster, teamIds, items, turns, enemies, hostagesLeft, hostageOfferIds, enemyTurnIndex, sold, enemiesDefeated])
